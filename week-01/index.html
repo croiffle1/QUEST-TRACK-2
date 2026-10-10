@@ -96,7 +96,6 @@
     gap: 10px;
     touch-action: none;
     user-select: none;
-    backdrop-filter: blur(4px);
   }
   .cell {
     aspect-ratio: 1;
@@ -108,7 +107,6 @@
     font-weight: bold;
     font-size: clamp(20px, 8vw, 40px);
     text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
-    transition: background 0.15s, box-shadow 0.15s;
   }
   .new { animation: appear 0.25s ease; }
   .merged { animation: pop 0.25s ease; }
@@ -319,8 +317,10 @@
       cell.style.color = value >= 2048 ? "#3b2a00" : "#fff";
       cell.style.fontSize = value >= 1024 ? "clamp(16px, 6vw, 30px)" : "";
       cell.classList.remove("new", "merged");
-      void cell.offsetWidth; // 애니메이션 다시 시작
-      if (value && i === newCell) cell.classList.add("new");
+    });
+    void boardEl.offsetWidth; // 애니메이션 다시 시작 (한 번만 계산)
+    cells.forEach((cell, i) => {
+      if (valueAt(i) && i === newCell) cell.classList.add("new");
       else if (mergedCells.includes(i)) cell.classList.add("merged");
     });
     newCell = -1;
@@ -340,13 +340,13 @@
   let stars = [];
 
   function resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5); // 너무 큰 화면 해상도는 낮춰서 가볍게
     for (const [canvas, ctx] of [[starCanvas, sctx], [partCanvas, pctx]]) {
       canvas.width = innerWidth * dpr;
       canvas.height = innerHeight * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    stars = Array.from({ length: Math.floor(innerWidth * innerHeight / 3000) }, () => ({
+    stars = Array.from({ length: Math.min(Math.floor(innerWidth * innerHeight / 5000), 300) }, () => ({
       x: Math.random() * innerWidth,
       y: Math.random() * innerHeight,
       r: Math.random() * 1.4 + 0.2,
@@ -359,6 +359,12 @@
 
   // ---------- 파티클 ----------
   let particles = [];
+  let hadParticles = false;
+  const MAX_PARTICLES = 400; // 방향키를 빨리 눌러도 너무 많이 쌓이지 않게
+
+  function addParticle(p) {
+    if (particles.length < MAX_PARTICLES) particles.push(p);
+  }
 
   function cellCenter(i) {
     const rect = cells[i].getBoundingClientRect();
@@ -373,7 +379,7 @@
     for (let k = 0; k < count; k++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = Math.random() * 4 + 1;
-      particles.push({
+      addParticle({
         x, y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
@@ -394,7 +400,7 @@
       if (!valueAt(i)) return;
       const [x, y, w] = cellCenter(i);
       for (let k = 0; k < 4; k++) {
-        particles.push({
+        addParticle({
           x: x + (Math.random() - 0.5) * w * 0.8,
           y: y + (Math.random() - 0.5) * w * 0.8,
           vx: dx * (Math.random() * 2 + 1) + (Math.random() - 0.5) * 0.6,
@@ -423,41 +429,45 @@
   function animate(time) {
     // 별 배경: 천천히 떠내려가며 반짝임
     sctx.clearRect(0, 0, innerWidth, innerHeight);
+    sctx.fillStyle = "#fff";
     for (const s of stars) {
       s.y += s.speed;
       if (s.y > innerHeight) { s.y = 0; s.x = Math.random() * innerWidth; }
       sctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(time / 1000 + s.phase));
-      sctx.fillStyle = "#fff";
-      sctx.beginPath();
-      sctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      sctx.fill();
+      sctx.fillRect(s.x, s.y, s.r * 1.6, s.r * 1.6); // 작은 별은 네모로 그려도 똑같아 보이고 훨씬 빨라요
     }
 
-    // 파티클
-    pctx.clearRect(0, 0, innerWidth, innerHeight);
-    pctx.globalCompositeOperation = "lighter";
-    particles = particles.filter(p => p.life > 0);
-    for (const p of particles) {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vx *= 0.95;
-      p.vy *= 0.95;
-      p.life -= p.decay;
-      pctx.globalAlpha = Math.max(p.life, 0);
-      pctx.fillStyle = p.color;
-      pctx.shadowColor = p.color;
-      pctx.shadowBlur = 10;
-      if (p.star) {
-        drawStar(pctx, p.x, p.y, p.size);
-      } else {
-        pctx.beginPath();
-        pctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        pctx.fill();
+    // 파티클 (남은 게 있을 때만 그림)
+    if (particles.length > 0 || hadParticles) {
+      pctx.clearRect(0, 0, innerWidth, innerHeight);
+      pctx.globalCompositeOperation = "lighter";
+      particles = particles.filter(p => p.life > 0);
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.95;
+        p.vy *= 0.95;
+        p.life -= p.decay;
+        pctx.fillStyle = p.color;
+        if (p.star) {
+          pctx.globalAlpha = Math.max(p.life, 0);
+          drawStar(pctx, p.x, p.y, p.size);
+        } else {
+          // 흐린 큰 원 + 밝은 작은 원으로 빛 번짐 흉내 (shadowBlur 보다 훨씬 가벼움)
+          pctx.globalAlpha = Math.max(p.life, 0) * 0.25;
+          pctx.beginPath();
+          pctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
+          pctx.fill();
+          pctx.globalAlpha = Math.max(p.life, 0);
+          pctx.beginPath();
+          pctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          pctx.fill();
+        }
       }
+      pctx.globalAlpha = 1;
+      pctx.globalCompositeOperation = "source-over";
+      hadParticles = particles.length > 0;
     }
-    pctx.shadowBlur = 0;
-    pctx.globalAlpha = 1;
-    pctx.globalCompositeOperation = "source-over";
     requestAnimationFrame(animate);
   }
   requestAnimationFrame(animate);
