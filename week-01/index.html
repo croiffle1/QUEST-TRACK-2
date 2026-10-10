@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048 우주</title>
+<style>
+  :root {
+    --text: #e6e9ff;
+    --muted: #9aa3d9;
+    --panel: rgba(20, 24, 60, 0.7);
+    --cell: rgba(255, 255, 255, 0.06);
+    --accent: #8b7bff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 30% 20%, #1b1f4a 0%, #0a0b1e 55%, #03030a 100%);
+    color: var(--text);
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px;
+    overflow-x: hidden;
+  }
+  /* 별 배경과 파티클은 화면 전체를 덮는 캔버스에 그려요 */
+  #stars, #particles {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  #stars { z-index: 0; }
+  #particles { z-index: 10; }
+  .wrap { position: relative; z-index: 1; width: 100%; max-width: 440px; }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 56px;
+    margin: 0;
+    background: linear-gradient(90deg, #7ad7ff, #b38bff, #ff8bd8);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 12px rgba(160, 130, 255, 0.6));
+  }
+  .scores { display: flex; gap: 6px; }
+  .score-box {
+    background: var(--panel);
+    border: 1px solid rgba(139, 123, 255, 0.4);
+    border-radius: 8px;
+    padding: 6px 14px;
+    text-align: center;
+    min-width: 70px;
+  }
+  .score-box span { display: block; font-size: 12px; color: var(--muted); }
+  .score-box b { font-size: 22px; }
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .howto { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .howto b { color: var(--text); }
+  button {
+    background: linear-gradient(135deg, #6a5cff, #b45cff);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 0 14px rgba(140, 100, 255, 0.5);
+  }
+  button:hover { filter: brightness(1.15); }
+  .board {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid rgba(139, 123, 255, 0.35);
+    box-shadow: 0 0 30px rgba(110, 90, 255, 0.25), inset 0 0 30px rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    touch-action: none;
+    user-select: none;
+    backdrop-filter: blur(4px);
+  }
+  .cell {
+    aspect-ratio: 1;
+    background: var(--cell);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: clamp(20px, 8vw, 40px);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+  .new { animation: appear 0.25s ease; }
+  .merged { animation: pop 0.25s ease; }
+  @keyframes appear { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes pop { 50% { transform: scale(1.18); } }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(8, 8, 30, 0.8);
+    border-radius: 12px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 2;
+  }
+  .overlay.show { display: flex; }
+  .overlay p { font-size: 36px; font-weight: bold; margin: 0; text-shadow: 0 0 16px #b38bff; }
+  .overlay div { display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<canvas id="particles"></canvas>
+
+<div class="wrap">
+  <header>
+    <h1>2048</h1>
+    <div class="scores">
+      <div class="score-box"><span>점수</span><b id="score">0</b></div>
+      <div class="score-box"><span>최고 점수</span><b id="best">0</b></div>
+    </div>
+  </header>
+
+  <div class="bar">
+    <p class="howto">
+      <b>방향키</b>(휴대폰은 <b>밀기</b>)로 타일을 움직여요.<br>
+      같은 숫자가 부딪히면 합쳐져요. <b>2048</b>을 만들어 보세요!
+    </p>
+    <button id="restart">다시 하기</button>
+  </div>
+
+  <div class="board" id="board">
+    <div class="overlay" id="overlay">
+      <p id="message"></p>
+      <div>
+        <button id="keepGoing">계속하기</button>
+        <button id="retry">다시 하기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SIZE = 4;
+  // 숫자가 커질수록 푸른 별 → 보라 성운 → 분홍 → 황금빛 태양으로
+  const COLORS = {
+    2: "#3b5bdb", 4: "#4c6ef5",
+    8: "#5f3dc4", 16: "#7048e8",
+    32: "#9c36b5", 64: "#c2255c",
+    128: "#e64980", 256: "#f76707",
+    512: "#f59f00", 1024: "#fab005",
+    2048: "#ffd43b"
+  };
+
+  const boardEl = document.getElementById("board");
+  const scoreEl = document.getElementById("score");
+  const bestEl = document.getElementById("best");
+  const overlay = document.getElementById("overlay");
+  const message = document.getElementById("message");
+  const keepGoingBtn = document.getElementById("keepGoing");
+
+  let grid, score, won, keepPlaying, newCell, mergedCells;
+
+  // 최고 점수는 브라우저에 저장 (저장이 막힌 환경이어도 게임은 동작)
+  function loadBest() {
+    try { return Number(localStorage.getItem("best2048")) || 0; } catch (e) { return 0; }
+  }
+  function saveBest(value) {
+    try { localStorage.setItem("best2048", value); } catch (e) {}
+  }
+  let best = loadBest();
+
+  // 칸 16개 만들기
+  const cells = [];
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    boardEl.insertBefore(cell, overlay);
+    cells.push(cell);
+  }
+
+  function newGame() {
+    grid = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+    score = 0;
+    won = false;
+    keepPlaying = false;
+    mergedCells = [];
+    overlay.classList.remove("show");
+    addRandomTile();
+    addRandomTile();
+    draw();
+  }
+
+  function addRandomTile() {
+    const empty = [];
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (grid[r][c] === 0) empty.push([r, c]);
+    if (empty.length === 0) return;
+    const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+    grid[r][c] = Math.random() < 0.9 ? 2 : 4;
+    newCell = r * SIZE + c;
+  }
+
+  // 한 줄을 왼쪽으로 밀고 합치기
+  function slideLine(line) {
+    const nums = line.filter(n => n !== 0);
+    const result = [];
+    const mergedAt = [];
+    for (let i = 0; i < nums.length; i++) {
+      if (nums[i] === nums[i + 1]) {
+        const value = nums[i] * 2;
+        result.push(value);
+        mergedAt.push(result.length - 1);
+        score += value;
+        if (value === 2048) won = true;
+        i++;
+      } else {
+        result.push(nums[i]);
+      }
+    }
+    while (result.length < SIZE) result.push(0);
+    return { result, mergedAt };
+  }
+
+  // 방향별로 각 줄의 칸 위치 목록 (밀리는 쪽이 앞)
+  function getLines(dir) {
+    const lines = [];
+    for (let i = 0; i < SIZE; i++) {
+      const line = [];
+      for (let j = 0; j < SIZE; j++) {
+        if (dir === "left") line.push([i, j]);
+        if (dir === "right") line.push([i, SIZE - 1 - j]);
+        if (dir === "up") line.push([j, i]);
+        if (dir === "down") line.push([SIZE - 1 - j, i]);
+      }
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  function move(dir) {
+    if (overlay.classList.contains("show")) return;
+    let moved = false;
+    mergedCells = [];
+    for (const line of getLines(dir)) {
+      const values = line.map(([r, c]) => grid[r][c]);
+      const { result, mergedAt } = slideLine(values);
+      line.forEach(([r, c], k) => {
+        if (grid[r][c] !== result[k]) moved = true;
+        grid[r][c] = result[k];
+      });
+      mergedAt.forEach(k => mergedCells.push(line[k][0] * SIZE + line[k][1]));
+    }
+    if (!moved) return;
+    trail(dir);
+    mergedCells.forEach(i => burst(i, 26 + Math.log2(valueAt(i)) * 3, valueAt(i)));
+    addRandomTile();
+    burst(newCell, 10, valueAt(newCell));
+    draw();
+    checkEnd();
+  }
+
+  function valueAt(i) { return grid[Math.floor(i / SIZE)][i % SIZE]; }
+
+  function canMove() {
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++) {
+        if (grid[r][c] === 0) return true;
+        if (c < SIZE - 1 && grid[r][c] === grid[r][c + 1]) return true;
+        if (r < SIZE - 1 && grid[r][c] === grid[r + 1][c]) return true;
+      }
+    return false;
+  }
+
+  function checkEnd() {
+    if (won && !keepPlaying) {
+      message.textContent = "2048 달성! 🚀";
+      keepGoingBtn.style.display = "";
+      overlay.classList.add("show");
+      for (let i = 0; i < SIZE * SIZE; i++) burst(i, 20, 2048);
+    } else if (!canMove()) {
+      message.textContent = "게임 끝! 🌌";
+      keepGoingBtn.style.display = "none";
+      overlay.classList.add("show");
+    }
+  }
+
+  function draw() {
+    cells.forEach((cell, i) => {
+      const value = valueAt(i);
+      const color = COLORS[value] || (value ? "#fff3bf" : "");
+      cell.textContent = value || "";
+      cell.style.background = value ? `radial-gradient(circle at 35% 30%, #ffffff55, ${color} 60%)` : "";
+      cell.style.boxShadow = value ? `0 0 ${8 + Math.log2(value) * 2}px ${color}` : "";
+      cell.style.color = value >= 2048 ? "#3b2a00" : "#fff";
+      cell.style.fontSize = value >= 1024 ? "clamp(16px, 6vw, 30px)" : "";
+      cell.classList.remove("new", "merged");
+      void cell.offsetWidth; // 애니메이션 다시 시작
+      if (value && i === newCell) cell.classList.add("new");
+      else if (mergedCells.includes(i)) cell.classList.add("merged");
+    });
+    newCell = -1;
+    scoreEl.textContent = score;
+    if (score > best) {
+      best = score;
+      saveBest(best);
+    }
+    bestEl.textContent = best;
+  }
+
+  // ---------- 별 배경 ----------
+  const starCanvas = document.getElementById("stars");
+  const sctx = starCanvas.getContext("2d");
+  const partCanvas = document.getElementById("particles");
+  const pctx = partCanvas.getContext("2d");
+  let stars = [];
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    for (const [canvas, ctx] of [[starCanvas, sctx], [partCanvas, pctx]]) {
+      canvas.width = innerWidth * dpr;
+      canvas.height = innerHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    stars = Array.from({ length: Math.floor(innerWidth * innerHeight / 3000) }, () => ({
+      x: Math.random() * innerWidth,
+      y: Math.random() * innerHeight,
+      r: Math.random() * 1.4 + 0.2,
+      speed: Math.random() * 0.15 + 0.02,
+      phase: Math.random() * Math.PI * 2
+    }));
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  // ---------- 파티클 ----------
+  let particles = [];
+
+  function cellCenter(i) {
+    const rect = cells[i].getBoundingClientRect();
+    return [rect.left + rect.width / 2, rect.top + rect.height / 2, rect.width];
+  }
+
+  // 타일이 합쳐지거나 생길 때 터지는 반짝이
+  function burst(i, count, value) {
+    if (i < 0) return;
+    const [x, y, w] = cellCenter(i);
+    const base = COLORS[value] || "#ffd43b";
+    for (let k = 0; k < count; k++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 4 + 1;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        decay: Math.random() * 0.02 + 0.015,
+        size: Math.random() * 3 + 1.5,
+        color: Math.random() < 0.35 ? "#ffffff" : base,
+        star: Math.random() < 0.3
+      });
+    }
+  }
+
+  // 움직인 방향 반대쪽으로 흩날리는 별가루
+  function trail(dir) {
+    const dx = { left: 1, right: -1, up: 0, down: 0 }[dir];
+    const dy = { left: 0, right: 0, up: 1, down: -1 }[dir];
+    cells.forEach((cell, i) => {
+      if (!valueAt(i)) return;
+      const [x, y, w] = cellCenter(i);
+      for (let k = 0; k < 4; k++) {
+        particles.push({
+          x: x + (Math.random() - 0.5) * w * 0.8,
+          y: y + (Math.random() - 0.5) * w * 0.8,
+          vx: dx * (Math.random() * 2 + 1) + (Math.random() - 0.5) * 0.6,
+          vy: dy * (Math.random() * 2 + 1) + (Math.random() - 0.5) * 0.6,
+          life: 0.8,
+          decay: 0.03,
+          size: Math.random() * 1.8 + 0.6,
+          color: ["#7ad7ff", "#b38bff", "#ffffff"][k % 3],
+          star: false
+        });
+      }
+    });
+  }
+
+  function drawStar(ctx, x, y, r) {
+    ctx.beginPath();
+    for (let k = 0; k < 8; k++) {
+      const len = k % 2 === 0 ? r * 2.2 : r * 0.6;
+      const a = (k * Math.PI) / 4;
+      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function animate(time) {
+    // 별 배경: 천천히 떠내려가며 반짝임
+    sctx.clearRect(0, 0, innerWidth, innerHeight);
+    for (const s of stars) {
+      s.y += s.speed;
+      if (s.y > innerHeight) { s.y = 0; s.x = Math.random() * innerWidth; }
+      sctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(time / 1000 + s.phase));
+      sctx.fillStyle = "#fff";
+      sctx.beginPath();
+      sctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      sctx.fill();
+    }
+
+    // 파티클
+    pctx.clearRect(0, 0, innerWidth, innerHeight);
+    pctx.globalCompositeOperation = "lighter";
+    particles = particles.filter(p => p.life > 0);
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.95;
+      p.vy *= 0.95;
+      p.life -= p.decay;
+      pctx.globalAlpha = Math.max(p.life, 0);
+      pctx.fillStyle = p.color;
+      pctx.shadowColor = p.color;
+      pctx.shadowBlur = 10;
+      if (p.star) {
+        drawStar(pctx, p.x, p.y, p.size);
+      } else {
+        pctx.beginPath();
+        pctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        pctx.fill();
+      }
+    }
+    pctx.shadowBlur = 0;
+    pctx.globalAlpha = 1;
+    pctx.globalCompositeOperation = "source-over";
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+
+  // 키보드
+  const KEYS = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+  document.addEventListener("keydown", e => {
+    if (KEYS[e.key]) {
+      e.preventDefault();
+      move(KEYS[e.key]);
+    }
+  });
+
+  // 휴대폰 밀기
+  let startX, startY;
+  boardEl.addEventListener("pointerdown", e => { startX = e.clientX; startY = e.clientY; });
+  boardEl.addEventListener("pointerup", e => {
+    if (startX === undefined) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    startX = undefined;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 30) return;
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? "right" : "left");
+    else move(dy > 0 ? "down" : "up");
+  });
+
+  document.getElementById("restart").addEventListener("click", newGame);
+  document.getElementById("retry").addEventListener("click", newGame);
+  keepGoingBtn.addEventListener("click", () => {
+    keepPlaying = true;
+    overlay.classList.remove("show");
+  });
+
+  newGame();
+</script>
+</body>
+</html>
