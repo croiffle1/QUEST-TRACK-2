@@ -1028,17 +1028,16 @@ const SPIN = [       // 크게 한 바퀴 휘돌리기
   { t: 1, p: P(-0.3, -0.55, -0.5, -1.45, 1.3, 0.1, 0) },
 ];
 
-// ---------- Y: 무기 자세히 보기 ----------
-// 관찰 → 오른손 한 손으로 가운데를 잡고 시계 방향 5바퀴 → 느려지며 왼손으로 토스
-// → 왼손으로 반시계 3바퀴 + 느려지며 한 바퀴 → 오른쪽 위로 던져 양손으로 잡기
+// ---------- Y: 무기 자세히 보기 (1인칭만) ----------
+// 관찰 → 오른손으로 가운데를 잡고 시계 방향 5바퀴 → 도는 힘 그대로 왼손에 던져 탁 잡기
+// → 왼손으로 반시계 3바퀴 + 한 바퀴 → 오른쪽 위로 던져 오른손을 뻗어 탁 잡기 → 천천히 내리며 왼손도 잡고 끝
 // 아무 공격이나 스킬을 쓰면 바로 끊김
 const TURN = Math.PI * 2;
 const SCY_CENTER = 0.34 * 0.72;                     // 손잡이에서 자루 가운데까지 거리
 const handC = new THREE.Object3D(); handC.position.set(0, 0.34, 0); vmScy.add(handC);
 const R_HOLD = new THREE.Vector3(0.32, -0.18, -0.9), L_HOLD = new THREE.Vector3(-0.32, -0.18, -0.9);
+const R_CATCH = new THREE.Vector3(0.4, 0.06, -0.88);  // 오른손 자리보다 살짝 위 (손을 뻗어 잡음)
 const R_FREE = new THREE.Vector3(0.5, -1.05, -0.2), L_FREE = new THREE.Vector3(-0.5, -1.05, -0.2);
-const TOSS_MID = new THREE.Vector3(0, 0.3, -1.1);    // 토스할 때 지나가는 높이
-const THROW_MID = new THREE.Vector3(1.1, 1.55, -1.7); // 오른쪽 위로 던질 때 지나가는 곳
 const OBSERVE = [
   { t: 0, p: REST },
   { t: 0.45, p: P(0.45, -0.45, -1.0, 0, 0.3, 1.2, Math.PI) },           // 앞으로 눕혀 날 옆면 보이기
@@ -1046,23 +1045,35 @@ const OBSERVE = [
 ];
 const OBS_END = 1.0, GRAB = 0.4;
 const W_FAST = 3.5 * TURN;
-// [걸리는 시간, 시작 각속도, 끝 각속도]  (시계 방향은 -)
-const SPIN_R = [[0.2, 0, -W_FAST], [1.33, -W_FAST, -W_FAST], [0.9, -W_FAST, -0.4 * TURN]];
-const TOSS = 0.5;
-const SPIN_L = [[0.15, 0, W_FAST], [0.78, W_FAST, W_FAST], [0.55, W_FAST, 1.3 * TURN]];
-const THROW = 1.0;
-const sumDur = (segs) => segs.reduce((t, sg) => t + sg[0], 0);
-const T_R = OBS_END + GRAB, T_TOSS = T_R + sumDur(SPIN_R), T_L = T_TOSS + TOSS;
-const T_THROW = T_L + sumDur(SPIN_L), T_END = T_THROW + THROW;
+const TOSS_TIME = 0.38, THROW_TIME = 0.55, SETTLE = 0.9, CATCH_JOLT = 0.18;
+// [걸리는 시간, 시작 각속도, 끝 각속도]  (시계 방향은 -). 'fly' 는 날아가는 동안 (잡을 때 자루가 똑바로 서도록 맞춤)
+const SPIN_PLAN = [
+  [0.2, 0, -W_FAST], [1.33, -W_FAST, -W_FAST], [0.5, -W_FAST, -1.6 * TURN],  // 오른손 시계 방향
+  ['fly', TOSS_TIME, -1.6 * TURN],                                             // 그 빠르기 그대로 왼손으로
+  [0.15, 0, W_FAST], [0.78, W_FAST, W_FAST], [0.55, W_FAST, 1.3 * TURN],      // 왼손 반시계 방향
+  ['fly', THROW_TIME, 1.3 * TURN],                                             // 오른쪽 위로 던짐
+];
 const SPIN_SEGS = [];
+const T_R = OBS_END + GRAB;
 {
-  let t0 = T_R;
-  for (const [d, w0, w1] of [...SPIN_R, [TOSS, -0.4 * TURN, 0], ...SPIN_L, [THROW, 1.3 * TURN, 1.3 * TURN]]) {
+  let t0 = T_R, ang = 0;
+  for (const sg of SPIN_PLAN) {
+    let d, w0, w1;
+    if (sg[0] === 'fly') {
+      d = sg[1];
+      // 잡는 순간 자루가 똑바로 서도록 빠르기를 살짝 맞춤
+      let k = Math.round((ang + sg[2] * d) / TURN);
+      if (Math.sign(k * TURN - ang) !== Math.sign(sg[2])) k += Math.sign(sg[2]);
+      w0 = w1 = (k * TURN - ang) / d;
+    } else [d, w0, w1] = sg;
     SPIN_SEGS.push({ t0, d, w0, w1 });
+    ang += (w0 + w1) / 2 * d;
     t0 += d;
   }
 }
-// t 초일 때 돌아간 각도와 그때 빠르기
+const T_TOSS = SPIN_SEGS[3].t0, T_L = T_TOSS + TOSS_TIME;
+const T_THROW = SPIN_SEGS[7].t0, T_C = T_THROW + THROW_TIME, T_END = T_C + SETTLE;
+// t 초일 때 돌아간 각도와 그때 빠르기 (잡은 뒤에는 멈춤)
 function spinAt(t) {
   let ang = 0;
   for (const sg of SPIN_SEGS) {
@@ -1095,30 +1106,28 @@ function spinPose(center, ang, side, outC, outQ) {
 const REST_C = new THREE.Vector3(), REST_Q = new THREE.Quaternion();
 poseFrom7(REST, REST_C, REST_Q);
 const smooth01 = (x) => { x = THREE.MathUtils.clamp(x, 0, 1); return x * x * (3 - 2 * x); };
-function bezier(a, m, b, s, out) {
-  const u = 1 - s;
-  return out.set(u * u * a.x + 2 * u * s * m.x + s * s * b.x, u * u * a.y + 2 * u * s * m.y + s * s * b.y, u * u * a.z + 2 * u * s * m.z + s * s * b.z);
+// 던진 낫이 그리는 포물선
+function arc(a, b, h, s, out) {
+  out.lerpVectors(a, b, s);
+  out.y += 4 * h * s * (1 - s);
+  return out;
 }
-const wrapAng = (a) => { a = ((a % TURN) + TURN) % TURN; return a > Math.PI ? a - TURN : a; };
+// 탁 잡을 때 손이 살짝 밀렸다 돌아옴
+const jolt = (t, tc) => (t >= tc && t < tc + CATCH_JOLT) ? -0.045 * Math.sin(Math.PI * (t - tc) / CATCH_JOLT) : 0;
 
-// 무기 보기 한 장면: 낫 위치 · 방향, 3인칭용 7칸 자세, 두 손이 갈 곳, 도는 빠르기
+// 무기 보기 한 장면: 낫 위치 · 방향, 두 손이 갈 곳, 도는 빠르기
 const ins = {
-  C: new THREE.Vector3(), Q: new THREE.Quaternion(), pose7: REST.slice(), omega: 0,
+  C: new THREE.Vector3(), Q: new THREE.Quaternion(), omega: 0,
   hR: { a: null, b: null, s: 0 }, hL: { a: null, b: null, s: 0 },
 };
 const insC2 = new THREE.Vector3(), insQ2 = new THREE.Quaternion(), insP2 = REST.slice();
 function setHand(h, a, b, s) { h.a = a; h.b = b; h.s = THREE.MathUtils.clamp(s, 0, 1); }
-function spin7(center, ang, out) {
-  out[0] = center.x; out[1] = center.y; out[2] = center.z;
-  out[3] = 0; out[4] = 0; out[5] = REST[5] + wrapAng(ang); out[6] = 0;
-  return out;
-}
 function inspectFrame(t) {
   const [ang, omega] = spinAt(t);
   ins.omega = omega;
   if (t < OBS_END) {
-    samplePose(OBSERVE, t, ins.pose7);
-    poseFrom7(ins.pose7, ins.C, ins.Q);
+    samplePose(OBSERVE, t, insP2);
+    poseFrom7(insP2, ins.C, ins.Q);
     setHand(ins.hR, handR, handR, 0); setHand(ins.hL, handL, handL, 0);
   } else if (t < T_R) {
     // 오른손으로 자루 가운데를 잡아 세움
@@ -1128,37 +1137,36 @@ function inspectFrame(t) {
     spinPose(R_HOLD, 0, 1, ins.C, ins.Q);
     ins.C.lerpVectors(insC2, ins.C, s);
     ins.Q.slerpQuaternions(insQ2, ins.Q, s);
-    const sp = spin7(R_HOLD, 0, tmpPose);
-    for (let i = 0; i < 7; i++) ins.pose7[i] = insP2[i] + (sp[i] - insP2[i]) * s;
     setHand(ins.hR, handR, handC, s); setHand(ins.hL, handL, L_FREE, s);
   } else if (t < T_TOSS) {
     spinPose(R_HOLD, ang, 1, ins.C, ins.Q);
-    spin7(R_HOLD, ang, ins.pose7);
     setHand(ins.hR, handC, handC, 0); setHand(ins.hL, L_FREE, L_FREE, 0);
   } else if (t < T_L) {
-    // 오른손에서 왼손으로 토스
-    const s = (t - T_TOSS) / TOSS;
-    bezier(R_HOLD, TOSS_MID, L_HOLD, smooth01(s), insC2);
-    spinPose(insC2, ang, 1 - 2 * smooth01(s), ins.C, ins.Q);
-    spin7(insC2, ang, ins.pose7);
-    setHand(ins.hR, handC, R_FREE, s / 0.4); setHand(ins.hL, L_FREE, handC, (s - 0.45) / 0.55);
+    // 도는 힘 그대로 왼손 쪽으로 던짐. 왼손이 마중 나감
+    const s = (t - T_TOSS) / TOSS_TIME;
+    arc(R_HOLD, L_HOLD, 0.22, s, insC2);
+    spinPose(insC2, ang, 1 - 2 * s, ins.C, ins.Q);
+    setHand(ins.hR, R_HOLD, R_FREE, s / 0.6); setHand(ins.hL, L_FREE, L_HOLD, smooth01(s / 0.8));
   } else if (t < T_THROW) {
-    spinPose(L_HOLD, ang, -1, ins.C, ins.Q);
-    spin7(L_HOLD, ang, ins.pose7);
-    setHand(ins.hR, R_FREE, R_FREE, 0); setHand(ins.hL, handC, handC, 0);
-  } else {
-    // 오른쪽 위로 던졌다가 양손으로 잡기
-    const s = Math.min(1, (t - T_THROW) / THROW);
-    const k = smooth01((s - 0.65) / 0.35);
-    bezier(L_HOLD, THROW_MID, REST_C, s, insC2);
+    // 왼손으로 탁 잡고 반시계 방향으로 돌림
+    insC2.copy(L_HOLD); insC2.y += jolt(t, T_L);
     spinPose(insC2, ang, -1, ins.C, ins.Q);
-    ins.Q.slerp(REST_Q, k);
-    const sp = spin7(insC2, ang, tmpPose);
-    for (let i = 0; i < 7; i++) ins.pose7[i] = sp[i] + (REST[i] - sp[i]) * k;
-    const grab = smooth01((s - 0.72) / 0.28);
-    setHand(ins.hR, R_FREE, handR, grab);
-    if (s < 0.25) setHand(ins.hL, handC, L_FREE, s / 0.25);
-    else setHand(ins.hL, L_FREE, handL, grab);
+    setHand(ins.hR, R_FREE, R_FREE, 0); setHand(ins.hL, handC, handC, 0);
+  } else if (t < T_C) {
+    // 오른쪽 위로 던짐. 오른손이 평소보다 높이 뻗어 마중 나감
+    const s = (t - T_THROW) / THROW_TIME;
+    arc(L_HOLD, R_CATCH, 0.55, s, insC2);
+    spinPose(insC2, ang, -1 + 2 * s, ins.C, ins.Q);
+    setHand(ins.hL, L_HOLD, L_FREE, s / 0.5); setHand(ins.hR, R_FREE, R_CATCH, smooth01(s / 0.85));
+  } else {
+    // 오른손으로 탁 잡은 뒤 천천히 내리면서 왼손도 잡음
+    const s = Math.min(1, (t - T_C) / SETTLE);
+    const k = smooth01(s);
+    spinPose(R_CATCH, ang, 1, insC2, insQ2);
+    insC2.y += jolt(t, T_C);
+    ins.C.lerpVectors(insC2, REST_C, k);
+    ins.Q.slerpQuaternions(insQ2, REST_Q, k);
+    setHand(ins.hR, handC, handR, k); setHand(ins.hL, L_FREE, handL, smooth01((s - 0.35) / 0.65));
   }
   return ins;
 }
@@ -1215,7 +1223,7 @@ function updateViewModel(dt) {
   // 낫 자세: 공격 중이면 그 동작, 아니면 기본 자세로 돌아감
   const insp = action && action.def.inspect;
   let target = REST, rate = 10;
-  if (insp) { inspectFrame(action.t); target = ins.pose7; rate = 1000; }
+  if (insp) inspectFrame(action.t);
   else if (action) { target = samplePose(action.def.keys, action.t / action.def.dur, tmpPose); rate = 30; }
   else if (ult) target = ULT_POSE;
   const a = Math.min(1, dt * rate);
@@ -1228,11 +1236,11 @@ function updateViewModel(dt) {
   // 무기 보기 중에는 날이 반짝임
   glowMat.color.copy(glowBase);
   if (insp) glowMat.color.lerp(glowHot, 0.35 + 0.35 * Math.sin(action.t * 7));
-  vmState.atkW += ((action ? 1 : 0) - vmState.atkW) * Math.min(1, dt * 14);
+  vmState.atkW += ((action && !insp ? 1 : 0) - vmState.atkW) * Math.min(1, dt * 14);
 
   if (insp) {
     // 무기 보기: 자루 가운데를 축으로 돌리고, 손은 장면마다 잡을 곳으로
-    if (rate >= 1000) for (let i = 0; i < 7; i++) vmPose[i] = target[i];
+    for (let i = 0; i < 7; i++) vmPose[i] = REST[i];   // 끝나거나 끊기면 기본 자세에서 이어짐
     vmRig.position.copy(ins.C);
     vmRig.quaternion.copy(ins.Q);
     vmScy.rotation.y = 0;
