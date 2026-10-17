@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>용어 탐정 사무소</title>
+<style>
+  :root {
+    --bg: #15110d;
+    --bg-2: #211a13;
+    --cork: #8a6a45;
+    --cork-dark: #6e5233;
+    --paper: #f3e8cf;
+    --paper-2: #e9dab8;
+    --ink: #2b2118;
+    --ink-soft: #6b5a46;
+    --gold: #e0b45a;
+    --gold-dark: #b8892f;
+    --red: #b8372e;
+    --green: #3f7d4a;
+    --text: #f1e6d0;
+    --text-soft: #b9a88c;
+    --card-back: #3a2c1f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: radial-gradient(ellipse at top, #2a2118 0%, var(--bg) 70%) fixed;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; }
+  .hidden { display: none !important; }
+  button { font: inherit; cursor: pointer; }
+
+  /* ---------- 시작 화면 ---------- */
+  .title-box { text-align: center; padding: 30px 0 10px; }
+  .badge {
+    display: inline-block; width: 74px; height: 74px; border-radius: 50%;
+    background: var(--gold); color: var(--bg); font-size: 38px; line-height: 74px;
+    box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--gold-dark);
+  }
+  h1 { font-size: 34px; margin: 16px 0 6px; letter-spacing: 2px; color: var(--gold); }
+  .subtitle { color: var(--text-soft); margin: 0 0 10px; }
+  .howto {
+    background: var(--bg-2); border: 1px dashed var(--gold-dark); border-radius: 10px;
+    padding: 14px 18px; margin: 18px auto; max-width: 620px; color: var(--text-soft); font-size: 15px;
+  }
+  .howto b { color: var(--text); }
+  .howto ol { margin: 6px 0 0; padding-left: 20px; }
+  .part-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 24px; }
+  .part-card {
+    background: var(--paper); color: var(--ink); border: none; border-radius: 6px;
+    padding: 20px 18px 18px; text-align: left; position: relative;
+    box-shadow: 0 6px 18px rgba(0,0,0,.45); transition: transform .15s;
+  }
+  .part-card:nth-child(1) { transform: rotate(-1.5deg); }
+  .part-card:nth-child(2) { transform: rotate(1deg); }
+  .part-card:nth-child(3) { transform: rotate(-.5deg); }
+  .part-card:hover { transform: rotate(0) translateY(-4px); }
+  .part-card .tag { font-size: 13px; color: var(--red); font-weight: bold; letter-spacing: 1px; }
+  .part-card .name { font-size: 20px; font-weight: bold; margin: 4px 0 8px; }
+  .part-card .meta { font-size: 14px; color: var(--ink-soft); }
+  .part-card .best { font-size: 13px; color: var(--green); margin-top: 6px; min-height: 1em; }
+  .part-card::before {
+    content: ""; position: absolute; top: -8px; left: 50%; width: 16px; height: 16px; margin-left: -8px;
+    border-radius: 50%; background: var(--red); box-shadow: 0 2px 3px rgba(0,0,0,.5);
+  }
+
+  /* ---------- 사건 화면 ---------- */
+  .topbar {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--bg-2); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+  }
+  .topbar .where { font-weight: bold; color: var(--gold); }
+  .topbar .stat { color: var(--text-soft); font-size: 14px; }
+  .topbar .stat b { color: var(--text); }
+  .home-btn {
+    background: transparent; color: var(--text-soft); border: 1px solid var(--text-soft);
+    border-radius: 6px; padding: 4px 10px; font-size: 13px;
+  }
+  .progress { height: 6px; background: #000; border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .progress div { height: 100%; background: var(--gold); width: 0; transition: width .3s; }
+
+  .case-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; }
+  .case-head h2 { margin: 0; font-size: 22px; }
+  .chip { font-size: 13px; padding: 2px 10px; border-radius: 20px; background: var(--gold); color: var(--bg); font-weight: bold; }
+  .chip.diff { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
+  .clue-count { margin-left: auto; color: var(--text-soft); font-size: 14px; }
+
+  .board {
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255,255,255,.06) 0 2px, transparent 3px) 0 0 / 23px 23px,
+      radial-gradient(circle at 70% 60%, rgba(0,0,0,.12) 0 2px, transparent 3px) 0 0 / 17px 17px,
+      var(--cork);
+    border: 12px solid #4a3522; border-radius: 6px;
+    box-shadow: inset 0 0 40px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.5);
+    padding: 26px 14px; min-height: 260px;
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 18px;
+  }
+
+  .clue {
+    width: 210px; background: none; border: none; padding: 0; perspective: 900px; color: var(--ink);
+    transition: transform .2s;
+  }
+  .clue.wide { width: 290px; }
+  .clue:hover { transform: var(--tilt) translateY(-4px) !important; }
+  .clue-inner {
+    display: grid; transition: transform .55s; transform-style: preserve-3d; position: relative;
+  }
+  .clue.open .clue-inner { transform: rotateY(180deg); }
+  .face {
+    grid-area: 1 / 1; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    border-radius: 4px; padding: 16px 14px 14px; box-shadow: 0 5px 12px rgba(0,0,0,.45);
+    text-align: left; position: relative; min-height: 120px;
+  }
+  .face::before {
+    content: ""; position: absolute; top: -7px; left: 50%; width: 14px; height: 14px; margin-left: -7px;
+    border-radius: 50%; background: var(--pin, var(--red)); box-shadow: 0 2px 3px rgba(0,0,0,.5);
+  }
+  .face.back {
+    background: repeating-linear-gradient(45deg, var(--card-back) 0 8px, #33271b 8px 16px);
+    color: var(--gold); display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border: 2px solid var(--gold-dark);
+  }
+  .face.back .q { font-size: 40px; line-height: 1; }
+  .face.back .lbl { font-size: 13px; letter-spacing: 2px; margin-top: 8px; }
+  .face.front { background: var(--paper); transform: rotateY(180deg); }
+  .face.front.note { background: #fff7c2; }
+  .face.front.record { background: var(--paper-2); }
+  .face .kind { font-size: 12px; font-weight: bold; color: var(--red); letter-spacing: 1px; margin-bottom: 6px; }
+  .face .body { font-size: 15px; white-space: pre-line; }
+  .face .body.big { font-size: 17px; font-weight: bold; }
+
+  /* ---------- 추리 노트 ---------- */
+  .deduce {
+    margin-top: 18px; background: var(--paper); color: var(--ink); border-radius: 6px;
+    padding: 18px; box-shadow: 0 6px 18px rgba(0,0,0,.45);
+    background-image: repeating-linear-gradient(transparent 0 27px, #d9c8a4 27px 28px);
+  }
+  .deduce.locked { background: var(--bg-2); background-image: none; color: var(--text-soft); text-align: center; border: 1px dashed var(--text-soft); box-shadow: none; }
+  .deduce h3 { margin: 0 0 4px; font-size: 18px; }
+  .deduce .ask { margin: 0 0 14px; font-size: 16px; font-weight: bold; }
+  .opts { display: grid; gap: 10px; }
+  .opt {
+    display: flex; gap: 10px; align-items: flex-start; text-align: left; width: 100%;
+    background: #fffaf0; color: var(--ink); border: 2px solid #cdb98f; border-radius: 6px; padding: 10px 12px;
+    font-size: 15px;
+  }
+  .opt .num { font-weight: bold; color: var(--red); min-width: 1.4em; }
+  .opt:hover:not(:disabled) { border-color: var(--ink); }
+  .opt.sel { border-color: var(--ink); background: #fbe7a8; }
+  .opt.right { border-color: var(--green); background: #d5ecd6; }
+  .opt.wrong { border-color: var(--red); background: #f3d0cb; }
+  .opt:disabled { cursor: default; }
+
+  .ox { display: flex; gap: 16px; justify-content: center; }
+  .ox .opt { width: 130px; height: 110px; justify-content: center; align-items: center; font-size: 54px; font-weight: bold; }
+
+  .slots { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .slot {
+    width: 46px; height: 46px; border: 2px dashed var(--ink-soft); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; background: #fffaf0;
+  }
+  .slot.filled { border-style: solid; border-color: var(--ink); background: #fbe7a8; }
+  .arrow { color: var(--ink-soft); }
+  .small-btn {
+    background: transparent; border: 1px solid var(--ink-soft); color: var(--ink); border-radius: 6px;
+    padding: 4px 10px; font-size: 13px; margin-left: 6px;
+  }
+
+  .match-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed #cdb98f; }
+  .match-row .term { min-width: 140px; font-weight: bold; }
+  .match-row .picks { display: flex; gap: 6px; }
+  .pick {
+    width: 42px; height: 38px; border-radius: 6px; border: 2px solid #cdb98f; background: #fffaf0; color: var(--ink); font-weight: bold;
+  }
+  .pick.sel { border-color: var(--ink); background: #fbe7a8; }
+  .pick:disabled { cursor: default; opacity: .75; }
+  .pick.sel:disabled { opacity: 1; }
+  .match-legend { font-size: 14px; color: var(--ink-soft); margin: 10px 0 0; white-space: pre-line; }
+
+  .solve-btn {
+    margin-top: 16px; width: 100%; padding: 13px; font-size: 17px; font-weight: bold; border: none; border-radius: 8px;
+    background: var(--ink); color: var(--gold);
+  }
+  .solve-btn:disabled { opacity: .35; cursor: default; }
+
+  /* ---------- 결과 ---------- */
+  .verdict {
+    margin-top: 18px; border-radius: 6px; padding: 18px; background: var(--paper); color: var(--ink);
+    position: relative; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.45);
+  }
+  .stamp {
+    display: inline-block; font-size: 24px; font-weight: 900; letter-spacing: 3px; padding: 4px 16px;
+    border: 4px solid currentColor; border-radius: 6px; transform: rotate(-6deg); margin-bottom: 10px;
+    animation: stamp .35s ease-out;
+  }
+  .stamp.ok { color: var(--green); }
+  .stamp.no { color: var(--red); }
+  @keyframes stamp { from { transform: rotate(-6deg) scale(2.2); opacity: 0; } to { transform: rotate(-6deg) scale(1); opacity: 1; } }
+  .verdict p { margin: 6px 0; }
+  .verdict .lab { font-weight: bold; color: var(--red); margin-right: 6px; }
+  .next-btn {
+    margin-top: 14px; padding: 12px 20px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px;
+    background: var(--gold); color: var(--bg); width: 100%;
+  }
+
+  /* ---------- 마지막 화면 ---------- */
+  .report {
+    background: var(--paper); color: var(--ink); border-radius: 6px; padding: 26px 22px; margin-top: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.5); text-align: center;
+  }
+  .report .score { font-size: 56px; font-weight: 900; margin: 6px 0; }
+  .report .rank { font-size: 22px; font-weight: bold; color: var(--red); }
+  .report .msg { color: var(--ink-soft); }
+  .report ul { text-align: left; padding: 0; list-style: none; margin: 18px 0 0; border-top: 1px dashed #cdb98f; }
+  .report li { padding: 8px 4px; border-bottom: 1px dashed #cdb98f; font-size: 14px; }
+  .report li .mark { display: inline-block; width: 1.4em; font-weight: bold; }
+  .report li.ok .mark { color: var(--green); }
+  .report li.no .mark { color: var(--red); }
+  .report li .ans { color: var(--ink-soft); display: block; padding-left: 1.4em; }
+  .btn-row { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+  .btn-row button { flex: 1; min-width: 150px; padding: 13px; font-size: 16px; font-weight: bold; border-radius: 8px; border: none; }
+  .btn-main { background: var(--ink); color: var(--gold); }
+  .btn-sub { background: transparent; color: var(--ink); border: 2px solid var(--ink) !important; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 27px; }
+    .board { padding: 22px 8px; gap: 14px; border-width: 8px; }
+    .clue, .clue.wide { width: calc(50% - 8px); }
+    .clue.wide { width: 100%; }
+    .face { padding: 14px 10px 10px; }
+    .face .body { font-size: 14px; }
+    .match-row .term { min-width: 100%; }
+    .ox .opt { width: 110px; height: 96px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 시작 화면 -->
+  <section id="start">
+    <div class="title-box">
+      <div class="badge">🔍</div>
+      <h1>용어 탐정 사무소</h1>
+      <p class="subtitle">흩어진 단서를 모아 읽고, 답이 되는 용어를 찾아 사건을 해결하라!</p>
+    </div>
+    <div class="howto">
+      <b>수사 방법</b>
+      <ol>
+        <li>사건 파일(Part)을 하나 고릅니다.</li>
+        <li>게시판에 흩어진 <b>단서 카드</b>를 눌러 모두 뒤집어 읽습니다.</li>
+        <li>단서를 다 모으면 <b>추리 노트</b>가 열립니다. 답을 골라 사건을 해결하세요.</li>
+      </ol>
+    </div>
+    <div class="part-list" id="partList"></div>
+  </section>
+
+  <!-- 사건 화면 -->
+  <section id="game" class="hidden">
+    <div class="topbar">
+      <span class="where" id="whereText"></span>
+      <span class="stat">사건 <b id="caseNo"></b> · 해결 <b id="solvedNo">0</b></span>
+      <button class="home-btn" id="homeBtn">사건 파일 고르기</button>
+    </div>
+    <div class="progress"><div id="progressBar"></div></div>
+
+    <div class="case-head">
+      <h2 id="caseTitle"></h2>
+      <span class="chip" id="typeChip"></span>
+      <span class="chip diff" id="diffChip"></span>
+      <span class="clue-count" id="clueCount"></span>
+    </div>
+
+    <div class="board" id="board"></div>
+
+    <div class="deduce locked" id="deduce"></div>
+    <div class="verdict hidden" id="verdict"></div>
+  </section>
+
+  <!-- 마지막 화면 -->
+  <section id="end" class="hidden">
+    <div class="report" id="report"></div>
+  </section>
+
+</div>
+
+<script>
+// ===== 문제 목록 =====
+// 4지선다 · 빈칸 · 상황 · 부탁 고치기: ans = 정답 보기 번호(1~4)
+// OX: ans = "O" 또는 "X"
+// 순서: items = A~D, ans = 정답 순서 (예: "ACBD")
+// 짝 맞히기: terms = 1~4, descs = 가~라, ans = 1~4 번에 짝이 되는 글자 (예: "나가라다")
+const QUESTIONS = [
+  // == Part 1 · Git · GitHub · Pages ==
+  { n: 1, part: 1, type: "4지선다", diff: 1, q: "고칠 때마다 저장 지점을 찍어 두는, 파일의 세이브 포인트 같은 프로그램은?",
+    opts: ["Python", "Orca", "Git", "Node.js"], ans: 3,
+    exp: "Git 은 저장 지점을 찍어 두고, 망가지면 잘 되던 지점으로 돌아가게 해 줍니다." },
+  { n: 2, part: 1, type: "빈칸", diff: 1, q: "Git 이 지켜보는 폴더를 (    )(이)라고 합니다.",
+    opts: ["저장소", "휴지통", "바탕화면", "토큰"], ans: 1,
+    exp: "저장소는 영어로 repository, 줄여서 repo 라고 합니다." },
+  { n: 3, part: 1, type: "OX", diff: 2, q: "저장소 안에 숨어 있는 .git 폴더가 Git 의 기록장이다.",
+    ans: "O", exp: "저장 지점(커밋)이 모두 .git 폴더 안에 기록됩니다." },
+  { n: 4, part: 1, type: "4지선다", diff: 1, q: "바뀐 것을 묶어 저장 지점 하나로 남기는 일은?",
+    opts: ["클론", "풀", "푸시", "커밋"], ans: 4,
+    exp: "\"커밋해 줘\" 하면 쌓인 변경을 묶어 기록장에 점 하나로 남깁니다." },
+  { n: 5, part: 1, type: "4지선다", diff: 2, q: "커밋 메시지(이름표)로 가장 좋은 것은?",
+    opts: ["ㅇㅇ", "점수 표시 추가", "1", "수정"], ans: 2,
+    exp: "무엇을 바꿨는지 한 줄로 적어야 나중에 이름표만 보고 그때를 찾습니다." },
+  { n: 6, part: 1, type: "OX", diff: 2, q: "Ctrl+S 로 저장만 해 두어도 예전 모습으로 돌아갈 수 있는 점이 생긴다.",
+    ans: "X", exp: "저장은 지금 모습으로 덮어쓰기, 돌아갈 점은 커밋해야 남습니다." },
+  { n: 7, part: 1, type: "4지선다", diff: 2, q: "두 커밋을 비교했을 때 빨간색 − 줄은 무엇일까?",
+    opts: ["들어온 줄", "빠진 줄", "그대로인 줄", "오류가 난 줄"], ans: 2,
+    exp: "빨강 − 는 빠진 줄, 초록 + 는 들어온 줄입니다." },
+  { n: 8, part: 1, type: "빈칸", diff: 2, q: "두 커밋의 차이, 즉 바뀐 줄을 영어로 (    )(이)라고 합니다.",
+    opts: ["push", "token", "repo", "diff"], ans: 4,
+    exp: "diff 는 차이(difference)를 줄인 말입니다." },
+  { n: 9, part: 1, type: "짝 맞히기", diff: 2, q: "용어와 설명을 짝 지어 봅니다.",
+    terms: ["로컬", "원격", "Git", "GitHub"],
+    descs: ["인터넷에 있는 저장소", "내 컴퓨터에 있는 저장소", "저장소를 인터넷에 보관해 주는 사이트", "내 컴퓨터에서 바뀐 것을 커밋으로 기록하는 프로그램"],
+    ans: "나가라다",
+    exp: "Git 은 프로그램, GitHub 는 보관소입니다. 같은 저장소가 로컬과 원격 두 곳에 있습니다." },
+  { n: 10, part: 1, type: "4지선다", diff: 1, q: "내 컴퓨터의 커밋을 GitHub 로 올려 보내는 일은?",
+    opts: ["푸시", "새로 고침", "풀", "커밋"], ans: 1,
+    exp: "푸시는 파일 하나가 아니라 저장 지점 묶음을 올립니다." },
+  { n: 11, part: 1, type: "OX", diff: 2, q: "커밋을 하나도 하지 않았어도 푸시하면 바뀐 파일이 GitHub 로 올라간다.",
+    ans: "X", exp: "푸시는 커밋을 올리는 일이라, 커밋이 없으면 올릴 것도 없습니다." },
+  { n: 12, part: 1, type: "4지선다", diff: 2, q: "GitHub 에 있는 저장소를 내 컴퓨터로 처음 통째로 받아 오는 일은?",
+    opts: ["풀", "푸시", "클론", "커밋"], ans: 3,
+    exp: "처음 한 번은 클론, 이미 있으면 풀로 새 커밋만 받습니다." },
+  { n: 13, part: 1, type: "상황", diff: 3, q: "집 컴퓨터에 이미 저장소가 있다. 학원에서 올린 새 커밋만 받아 오고 싶을 때 하는 부탁은?",
+    opts: ["\"다시 푸시해 줘\"", "\"저장소를 클론해 줘\"", "\"GitHub 의 새 커밋을 풀 해 줘\"", "\"지금 상태를 커밋해 줘\""], ans: 3,
+    exp: "이미 저장소가 있으면 통째로 받지 않고 풀로 새 커밋만 받습니다." },
+  { n: 14, part: 1, type: "4지선다", diff: 1, q: "저장소의 HTML 을 인터넷 주소로 누구나 볼 수 있게 해 주는 무료 전시장은?",
+    opts: ["GitHub Pages", "커밋", "컨텍스트", "토큰"], ans: 1,
+    exp: "GitHub Pages 는 저장소의 HTML 을 인터넷 주소로 보여 줍니다." },
+  { n: 15, part: 1, type: "빈칸", diff: 3, q: "주소 my-id.github.io/QUEST-TRACK-2/week-02/ 에서 QUEST-TRACK-2 는 (    ) 이름입니다.",
+    opts: ["GitHub 아이디", "폴더", "모델", "저장소"], ans: 4,
+    exp: "my-id 는 GitHub 아이디, QUEST-TRACK-2 는 저장소, week-02 는 폴더입니다." },
+  { n: 16, part: 1, type: "순서", diff: 3, q: "고친 게임을 친구가 주소로 보기까지, 일어나는 순서대로 놓아 봅니다.",
+    items: ["파일 고치기", "푸시", "커밋", "1~2분 뒤 Pages 반영"], ans: "ACBD",
+    exp: "고치고, 커밋해서 남기고, 푸시로 올리면 Pages 가 1~2분 뒤 새 모습을 보여 줍니다." },
+  { n: 17, part: 1, type: "OX", diff: 2, q: "푸시하자마자 새로 고침했는데 옛 모습이 보이면 페이지가 망가진 것이다.",
+    ans: "X", exp: "Pages 가 페이지를 다시 만드는 1~2분 동안은 옛 모습이 보입니다. 기다렸다가 F5 를 누릅니다." },
+  { n: 18, part: 1, type: "4지선다", diff: 3, q: "친구가 내 컴퓨터 안 파일 주소(file:///C:/...)를 입력해도 게임이 열리지 않는 까닭은?",
+    opts: ["커밋 메시지가 짧아서", "친구 컴퓨터에는 그 파일이 없어서", "인터넷이 느려서", "파일 이름이 영어라서"], ans: 2,
+    exp: "그래서 늘 켜져 있는 서버에 두고, 누구나 인터넷 주소로 찾아오게 합니다." },
+
+  // == Part 2 · AI 를 이해하는 말 ==
+  { n: 19, part: 2, type: "4지선다", diff: 1, q: "LLM 은 무엇의 줄임말일까?",
+    opts: ["Large Language Model", "Long Line Maker", "Local Link Manager", "Light Learning Machine"], ans: 1,
+    exp: "엄청 많은 글을 읽고(Large) 사람의 말을 다루는(Language) 프로그램(Model)입니다." },
+  { n: 20, part: 2, type: "OX", diff: 2, q: "AI 는 검색처럼 이미 있는 글을 찾아 그대로 보여 준다.",
+    ans: "X", exp: "AI 는 새 문장을 한 조각씩 이어 씁니다. 그래서 답이 매번 조금씩 다릅니다." },
+  { n: 21, part: 2, type: "빈칸", diff: 2, q: "LLM 은 수많은 글에서 (    ) 말을 가리고 맞혀 보는 연습으로 배웁니다.",
+    opts: ["영어", "다음", "맨 처음", "가장 긴"], ans: 2,
+    exp: "가린 다음 말을 맞혀 보고 정답과 비교하는 연습을 셀 수 없이 반복합니다." },
+  { n: 22, part: 2, type: "순서", diff: 2, q: "AI 가 답을 만드는 순서대로 놓아 봅니다.",
+    items: ["그중 그럴듯한 말을 골라 붙인다", "지금까지의 글을 본다", "다음 말 후보를 떠올린다", "답이 끝날 때까지 반복한다"], ans: "BCAD",
+    exp: "지금까지 글을 보고 후보를 떠올린 뒤, 그럴듯한 말을 골라 붙이기를 반복합니다." },
+  { n: 23, part: 2, type: "4지선다", diff: 1, q: "모르는 것도 그럴듯하게 지어낸 틀린 말을 무엇이라고 할까?",
+    opts: ["컨텍스트", "커밋", "클론", "할루시네이션"], ans: 4,
+    exp: "LLM 은 모르는 것도 그럴듯하게 이어 쓸 때가 있습니다." },
+  { n: 24, part: 2, type: "상황", diff: 3, q: "AI 가 \"퀴즈를 다 만들었습니다\" 라고 했다. 할루시네이션을 막으려면?",
+    opts: ["결과를 직접 열어 정답을 확인한다", "같은 부탁을 열 번 보낸다", "바로 /clear 한다", "그냥 믿고 친구에게 보낸다"], ans: 1,
+    exp: "다 됐다는 말만 믿지 않고, 결과를 직접 열어 내 눈으로 확인합니다." },
+  { n: 25, part: 2, type: "4지선다", diff: 1, q: "AI 가 글을 읽을 때 잘게 나누는 조각의 이름은?",
+    opts: ["폴더", "픽셀", "토큰", "커밋"], ans: 3,
+    exp: "AI 는 글을 토큰이라는 조각으로 나누고, 다음 말 맞히기도 한 토큰씩 합니다." },
+  { n: 26, part: 2, type: "OX", diff: 2, q: "글자 수와 토큰(조각) 수는 언제나 똑같다.",
+    ans: "X", exp: "한글은 1~2글자, 영어는 단어나 단어 조각이 한 토큰이라 글자 수와 다릅니다." },
+  { n: 27, part: 2, type: "4지선다", diff: 3, q: "토큰 수와 관계가 없는 것은?",
+    opts: ["AI 를 쓰는 비용", "답하는 데 걸리는 시간", "내 GitHub 아이디", "AI 가 한 번에 볼 수 있는 양"], ans: 3,
+    exp: "볼 수 있는 양, 비용, 시간은 모두 토큰으로 셉니다." },
+  { n: 28, part: 2, type: "빈칸", diff: 1, q: "AI 가 지금 펼쳐 놓고 보고 있는 책상 전부를 (    )(이)라고 합니다.",
+    opts: ["컨텍스트", "저장소", "모델", "diff"], ans: 1,
+    exp: "대화, 읽은 파일, CLAUDE.md 가 책상(컨텍스트)에 올라갑니다." },
+  { n: 29, part: 2, type: "4지선다", diff: 2, q: "Claude Code 하단 정보줄의 ① 막대가 보여 주는 것은?",
+    opts: ["커밋 개수", "인터넷 속도", "지금 쓰는 모델", "책상(컨텍스트)이 찬 정도"], ans: 4,
+    exp: "① 막대는 컨텍스트, ② 칸은 모델입니다." },
+  { n: 30, part: 2, type: "OX", diff: 3, q: "책상이 가득 차면 지난 대화를 지우지 않고 요약본으로 접는다.",
+    ans: "O", exp: "요약본은 짧아서 세부가 흐려질 수 있습니다." },
+  { n: 31, part: 2, type: "상황", diff: 2, q: "다른 새 작업을 시작하기 전에 책상을 비우는 명령은?",
+    opts: ["/quiz", "/clear", "/push", "/save"], ans: 2,
+    exp: "/clear 는 새 작업 전에 책상(컨텍스트)을 비웁니다." },
+  { n: 32, part: 2, type: "4지선다", diff: 3, q: "/clear 를 해도 규칙과 목표가 남아 있는 까닭은?",
+    opts: ["Pages 에 올려 두어서", "매번 다시 읽히는 CLAUDE.md 에 적어 두어서", "커밋을 해 두어서", "토큰이 많아서"], ans: 2,
+    exp: "CLAUDE.md 는 새 대화의 첫 부탁보다 먼저 다시 읽히는 메모입니다." },
+  { n: 33, part: 2, type: "짝 맞히기", diff: 2, q: "Claude 모델 4형제와 설명을 짝 지어 봅니다.",
+    terms: ["Fable", "Opus", "Sonnet", "Haiku"],
+    descs: ["빠르고 균형 잡힌 모델", "가장 빠르고 가벼운 모델", "가장 똑똑하고 가장 비싼 모델", "깊게 생각하는 강한 모델(우리 수업)"],
+    ans: "다라가나",
+    exp: "똑똑할수록 느리고 비쌉니다. 우리 수업은 Opus 하나를 씁니다." },
+  { n: 34, part: 2, type: "4지선다", diff: 1, q: "하단 정보줄 ② 칸에 보이는, 우리 수업에서 쓰는 모델은?",
+    opts: ["Fable", "Opus", "Sonnet", "Haiku"], ans: 2,
+    exp: "수업에서는 Opus 하나를 씁니다." },
+  { n: 35, part: 2, type: "OX", diff: 1, q: "Claude 도 LLM 의 하나다.",
+    ans: "O", exp: "Claude 처럼 엄청 많은 글을 읽고 말을 다루는 AI 를 LLM 이라고 부릅니다." },
+  { n: 36, part: 2, type: "상황", diff: 2, q: "AI 에게 같은 질문을 다시 했더니 이번엔 다른 이름을 지어 줬다. 왜일까?",
+    opts: ["인터넷이 끊겨서", "커밋을 안 해서", "AI 가 고장 나서", "다음 말을 매번 새로 골라 이어 쓰기 때문에"], ans: 4,
+    exp: "AI 는 검색처럼 같은 글을 찾지 않고, 매번 새 문장을 한 조각씩 만듭니다." },
+
+  // == Part 3 · 찾아서 고치는 부탁 ==
+  { n: 37, part: 3, type: "4지선다", diff: 1, q: "Claude Code 에게 \"재생 버튼 색만 초록으로 바꿔 줘\" 라고 하면?",
+    opts: ["그 부분을 찾아 그 부분만 고친다", "아무것도 하지 않는다", "새 파일을 만든다", "파일 전체를 처음부터 다시 쓴다"], ans: 1,
+    exp: "파일을 직접 열어 읽고, 고칠 줄을 찾아 그 줄만 바꿉니다." },
+  { n: 38, part: 3, type: "순서", diff: 2, q: "Claude Code 가 고치는 4단계를 순서대로 놓아 봅니다.",
+    items: ["파일 찾아 읽기", "그 부분만 수정하기", "부탁 이해하기", "고칠 곳 정하기"], ans: "CADB",
+    exp: "먼저 읽고, 찾고, 그다음 고칩니다." },
+  { n: 39, part: 3, type: "OX", diff: 2, q: "파일 전체를 통째로 다시 쓰면 잘 되던 곳까지 바뀔 수 있다.",
+    ans: "O", exp: "TRACK 1 에서 재생 버튼만 바꾸려다 볼륨 칸이 사라진 것처럼, 통째로 다시 쓰면 다른 곳도 바뀝니다." },
+  { n: 40, part: 3, type: "4지선다", diff: 2, q: "그 부분만 고칠 때 좋은 점이 아닌 것은?",
+    opts: ["잘 되던 곳이 망가지지 않는다", "바뀐 줄로 확인할 수 있다", "파일이 저절로 Pages 에 올라간다", "빠르다"], ans: 3,
+    exp: "Pages 에 올리려면 커밋하고 푸시해야 합니다." },
+  { n: 41, part: 3, type: "상황", diff: 2, q: "\"색 바꿔 줘\" 라고만 부탁하면 어떤 일이 생길까?",
+    opts: ["저절로 커밋된다", "파일이 지워진다", "색이 들어간 줄이 많아 AI 가 어디인지 헷갈린다", "정확히 한 줄만 바로 바뀐다"], ans: 3,
+    exp: "모호하면 후보가 많아집니다. 어디를 바꿀지 말해 줍니다." },
+  { n: 42, part: 3, type: "빈칸", diff: 1, q: "또렷한 부탁에는 어디 · 무엇 · (    )이(가) 들어갑니다.",
+    opts: ["어떻게", "언제", "누가", "왜"], ans: 1,
+    exp: "예: 재생 버튼(어디) 색(무엇)을 초록으로(어떻게)." },
+  { n: 43, part: 3, type: "부탁 고치기", diff: 2, q: "\"색 바꿔 줘\" 를 바르게 고친 부탁은?",
+    opts: ["\"전부 다시 만들어 줘\"", "\"아무 색이나 바꿔 줘\"", "\"색 좀 예쁘게 해 줘\"", "\"재생 버튼 색을 초록으로 바꿔 줘\""], ans: 4,
+    exp: "어디(재생 버튼) · 무엇(색) · 어떻게(초록으로)가 모두 들어 있습니다." },
+  { n: 44, part: 3, type: "부탁 고치기", diff: 3, q: "\"그거 좀 크게 해 줘\" 를 바르게 고친 부탁은?",
+    opts: ["\"그거 진짜 크게 해 줘\"", "\"곡 제목 글자 크기를 두 배로 키워 줘\"", "\"다 크게 해 줘\"", "\"처음부터 다시 만들어 줘\""], ans: 2,
+    exp: "\"그거\" 대신 어디를, \"크게\" 대신 얼마나를 말합니다." },
+  { n: 45, part: 3, type: "상황", diff: 3, q: "Claude Code 가 고친 뒤 무엇이 바뀌었는지 확인하려면 어디를 보면 될까?",
+    opts: ["토큰 수", "빨강 · 초록으로 보이는 바뀐 줄", "하단 정보줄 ② 칸", "내 GitHub 아이디"], ans: 2,
+    exp: "빨강 − 는 빠진 줄, 초록 + 는 들어온 줄입니다." },
+  { n: 46, part: 3, type: "짝 맞히기", diff: 3, q: "평소에 하는 말과, 용어로 바꾼 부탁을 짝 지어 봅니다.",
+    terms: ["이거 남겨 둬", "인터넷에 올려", "다시 가져와", "책상 좀 비워"],
+    descs: ["\"week-02 를 푸시해 줘\"", "\"GitHub 의 새 커밋을 풀 해 줘\"", "\"week-02 를 커밋해 줘\"", "/clear 입력하기"],
+    ans: "다가나라",
+    exp: "용어로 말하면 AI 가 되묻지 않고 한 번에 알아듣습니다." },
+  { n: 47, part: 3, type: "OX", diff: 1, q: "부탁 끝에 \"나머지는 그대로 둬\" 를 붙이면 고칠 곳이 아닌 곳은 건드리지 말라는 뜻이 된다.",
+    ans: "O", exp: "그 부분만 고치라는 뜻이 더 분명해집니다." },
+  { n: 48, part: 3, type: "빈칸", diff: 2, q: "\"재생 버튼 색을 초록으로 바꿔 줘\" 에서 재생 버튼은 어디 · 무엇 · 어떻게 중 (    )입니다.",
+    opts: ["무엇", "어떻게", "언제", "어디"], ans: 4,
+    exp: "재생 버튼(어디) 색(무엇)을 초록으로(어떻게)." },
+  { n: 49, part: 3, type: "부탁 고치기", diff: 2, q: "\"글자 좀 바꿔 줘\" 를 바르게 고친 부탁은?",
+    opts: ["\"곡 제목을 우주 산책 (라이브) 로 바꿔 줘\"", "\"아무 글자나 바꿔 줘\"", "\"처음부터 다시 써 줘\"", "\"글자 다 바꿔 줘\""], ans: 1,
+    exp: "어디(곡 제목)와 어떻게(무엇으로 바꿀지)를 함께 말합니다." },
+  { n: 50, part: 3, type: "순서", diff: 3, q: "고친 결과를 친구에게 보여 주기까지 순서대로 놓아 봅니다.",
+    items: ["바뀐 줄 확인하기", "커밋하고 푸시하기", "그 부분만 고쳐 달라고 부탁하기", "Pages 주소로 열어 보기"], ans: "CABD",
+    exp: "부탁하고, 바뀐 줄을 확인한 뒤, 커밋 · 푸시하면 Pages 주소로 새 모습을 봅니다." },
+];
+
+const PARTS = [
+  { id: 1, name: "Git · GitHub · Pages", file: "사건 파일 1" },
+  { id: 2, name: "AI 를 이해하는 말", file: "사건 파일 2" },
+  { id: 3, name: "찾아서 고치는 부탁", file: "사건 파일 3" },
+];
+
+const NUMS = ["①", "②", "③", "④"];
+const LETTERS = ["A", "B", "C", "D"];
+const HANGUL = ["가", "나", "다", "라"];
+const DIFF_TEXT = ["", "★ 쉬움", "★★ 보통", "★★★ 어려움"];
+const OPT_LABEL = { "4지선다": "용의자", "빈칸": "빠진 조각", "상황": "행동 후보", "부탁 고치기": "부탁 메모" };
+const HOW_TO = {
+  "4지선다": "용의자 4명 가운데 범인(정답) 하나를 지목하라.",
+  "빈칸": "의뢰서의 빈칸에 들어갈 조각 하나를 찾아라.",
+  "상황": "이 상황에서 해야 할 알맞은 행동 하나를 골라라.",
+  "부탁 고치기": "흐릿한 부탁을 바르게 고친 메모 하나를 골라라.",
+  "OX": "진술서가 참이면 O, 거짓이면 X.",
+  "순서": "장면 A~D 를 일어난 순서대로 놓아라.",
+  "짝 맞히기": "용어 1~4 와 설명 가~라 를 짝 지어라.",
+};
+
+// ===== 상태 =====
+let current = [];     // 지금 Part 의 문제들
+let partId = 0;
+let idx = 0;
+let results = [];     // { q, ok }
+let answer = null;    // 지금 고른 답
+let opened = 0;
+let totalClues = 0;
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+const show = (id) => ["start", "game", "end"].forEach((s) => $(s).classList.toggle("hidden", s !== id));
+
+function loadBest(id) {
+  try { return localStorage.getItem("termDetectiveBest" + id); } catch (e) { return null; }
+}
+function saveBest(id, score, total) {
+  try {
+    const old = loadBest(id);
+    if (old === null || score > Number(old.split("/")[0])) localStorage.setItem("termDetectiveBest" + id, score + "/" + total);
+  } catch (e) {}
+}
+
+// ===== 시작 화면 =====
+function renderStart() {
+  const list = $("partList");
+  list.innerHTML = "";
+  PARTS.forEach((p) => {
+    const count = QUESTIONS.filter((q) => q.part === p.id).length;
+    const btn = el("button", "part-card");
+    btn.appendChild(el("div", "tag", p.file.toUpperCase()));
+    btn.appendChild(el("div", "name", "Part " + p.id + " · " + p.name));
+    btn.appendChild(el("div", "meta", "사건 " + count + "건"));
+    const best = loadBest(p.id);
+    btn.appendChild(el("div", "best", best ? "최고 기록 " + best + " 해결" : ""));
+    btn.onclick = () => startPart(p.id);
+    list.appendChild(btn);
+  });
+  show("start");
+  window.scrollTo(0, 0);
+}
+
+function startPart(id) {
+  partId = id;
+  current = QUESTIONS.filter((q) => q.part === id);
+  idx = 0;
+  results = [];
+  show("game");
+  renderCase();
+}
+
+// ===== 사건 화면 =====
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildClues(q) {
+  const clues = [];
+  clues.push({ kind: "사건 기록", body: "사건 #Q" + q.n + "\n유형: " + q.type + "\n난이도: " + DIFF_TEXT[q.diff] + "\n\n지시: " + HOW_TO[q.type], style: "record", pin: "#3b6ea8" });
+  if (q.type === "OX") {
+    clues.push({ kind: "진술서", body: q.q, style: "note", big: true, wide: true });
+  } else {
+    clues.push({ kind: "의뢰서", body: q.q, style: "note", big: true, wide: true });
+  }
+  if (q.opts) {
+    q.opts.forEach((o, i) => clues.push({ kind: OPT_LABEL[q.type] + " " + NUMS[i], body: o }));
+  }
+  if (q.items) {
+    q.items.forEach((t, i) => clues.push({ kind: "장면 " + LETTERS[i], body: t, pin: "#3f7d4a" }));
+  }
+  if (q.terms) {
+    clues.push({ kind: "용어 1~4", body: q.terms.map((t, i) => (i + 1) + " " + t).join("\n"), pin: "#3b6ea8" });
+    clues.push({ kind: "설명 가~라", body: q.descs.map((d, i) => HANGUL[i] + " " + d).join("\n"), wide: true });
+  }
+  return clues;
+}
+
+function renderCase() {
+  const q = current[idx];
+  answer = null;
+  opened = 0;
+
+  $("whereText").textContent = "Part " + partId + " · " + PARTS[partId - 1].name;
+  $("caseNo").textContent = (idx + 1) + " / " + current.length;
+  $("solvedNo").textContent = results.filter((r) => r.ok).length;
+  $("progressBar").style.width = (idx / current.length * 100) + "%";
+  $("caseTitle").textContent = "사건 #Q" + q.n;
+  $("typeChip").textContent = q.type;
+  $("diffChip").textContent = DIFF_TEXT[q.diff];
+
+  const board = $("board");
+  board.innerHTML = "";
+  const clues = shuffle(buildClues(q));
+  totalClues = clues.length;
+  clues.forEach((c, i) => {
+    const btn = el("button", "clue" + (c.wide ? " wide" : ""));
+    const tilt = "rotate(" + (Math.random() * 10 - 5).toFixed(1) + "deg)";
+    btn.style.setProperty("--tilt", tilt);
+    btn.style.transform = tilt + " translateY(" + Math.round(Math.random() * 18) + "px)";
+    if (c.pin) btn.style.setProperty("--pin", c.pin);
+    const inner = el("div", "clue-inner");
+    const back = el("div", "face back");
+    back.appendChild(el("div", "q", "?"));
+    back.appendChild(el("div", "lbl", "단서 #" + (i + 1)));
+    const front = el("div", "face front " + (c.style || ""));
+    front.appendChild(el("div", "kind", c.kind));
+    front.appendChild(el("div", "body" + (c.big ? " big" : ""), c.body));
+    inner.appendChild(back);
+    inner.appendChild(front);
+    btn.appendChild(inner);
+    btn.onclick = () => {
+      if (btn.classList.contains("open")) return;
+      btn.classList.add("open");
+      opened++;
+      updateClueCount();
+      if (opened === totalClues) unlockDeduce(q);
+    };
+    board.appendChild(btn);
+  });
+  updateClueCount();
+
+  const d = $("deduce");
+  d.className = "deduce locked";
+  d.innerHTML = "";
+  d.appendChild(el("div", "", "🔒 단서 카드를 모두 뒤집으면 추리 노트가 열립니다."));
+  $("verdict").classList.add("hidden");
+  window.scrollTo(0, 0);
+}
+
+function updateClueCount() {
+  $("clueCount").textContent = "모은 단서 " + opened + " / " + totalClues;
+}
+
+function unlockDeduce(q) {
+  const d = $("deduce");
+  d.className = "deduce";
+  d.innerHTML = "";
+  d.appendChild(el("h3", "", "📓 추리 노트"));
+  d.appendChild(el("p", "ask", HOW_TO[q.type]));
+
+  const solve = el("button", "solve-btn", "사건 해결하기");
+  solve.disabled = true;
+  solve.onclick = () => judge(q);
+
+  if (q.opts) buildChoice(d, q, solve);
+  else if (q.type === "OX") buildOX(d, solve);
+  else if (q.items) buildOrder(d, q, solve);
+  else if (q.terms) buildMatch(d, q, solve);
+
+  d.appendChild(solve);
+  d.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function buildChoice(d, q, solve) {
+  const box = el("div", "opts");
+  q.opts.forEach((o, i) => {
+    const b = el("button", "opt");
+    b.dataset.v = i + 1;
+    b.appendChild(el("span", "num", NUMS[i]));
+    b.appendChild(el("span", "", o));
+    b.onclick = () => {
+      box.querySelectorAll(".opt").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel");
+      answer = i + 1;
+      solve.disabled = false;
+    };
+    box.appendChild(b);
+  });
+  d.appendChild(box);
+}
+
+function buildOX(d, solve) {
+  const box = el("div", "opts ox");
+  ["O", "X"].forEach((v) => {
+    const b = el("button", "opt", v);
+    b.dataset.v = v;
+    b.onclick = () => {
+      box.querySelectorAll(".opt").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel");
+      answer = v;
+      solve.disabled = false;
+    };
+    box.appendChild(b);
+  });
+  d.appendChild(box);
+}
+
+function buildOrder(d, q, solve) {
+  let seq = [];
+  const slots = el("div", "slots");
+  const box = el("div", "opts");
+  const reset = el("button", "small-btn", "다시 놓기");
+
+  function draw() {
+    slots.innerHTML = "";
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) slots.appendChild(el("span", "arrow", "→"));
+      slots.appendChild(el("div", "slot" + (seq[i] ? " filled" : ""), seq[i] || ""));
+    }
+    slots.appendChild(reset);
+    box.querySelectorAll(".opt").forEach((b) => {
+      b.disabled = seq.includes(b.dataset.v);
+      b.classList.toggle("sel", seq.includes(b.dataset.v));
+    });
+    answer = seq.length === 4 ? seq.join("") : null;
+    solve.disabled = !answer;
+  }
+
+  q.items.forEach((t, i) => {
+    const b = el("button", "opt");
+    b.dataset.v = LETTERS[i];
+    b.appendChild(el("span", "num", LETTERS[i]));
+    b.appendChild(el("span", "", t));
+    b.onclick = () => { if (seq.length < 4) { seq.push(LETTERS[i]); draw(); } };
+    box.appendChild(b);
+  });
+  reset.onclick = () => { seq = []; draw(); };
+  d.appendChild(slots);
+  d.appendChild(box);
+  draw();
+}
+
+function buildMatch(d, q, solve) {
+  const pick = [null, null, null, null];
+  const rows = [];
+  q.terms.forEach((t, i) => {
+    const row = el("div", "match-row");
+    row.appendChild(el("span", "term", (i + 1) + " " + t));
+    const picks = el("div", "picks");
+    HANGUL.forEach((h) => {
+      const b = el("button", "pick", h);
+      b.dataset.v = h;
+      b.onclick = () => {
+        // 다른 용어가 이미 고른 글자면 그쪽에서 빼기
+        pick.forEach((p, j) => { if (p === h && j !== i) pick[j] = null; });
+        pick[i] = h;
+        draw();
+      };
+      picks.appendChild(b);
+    });
+    row.appendChild(picks);
+    rows.push(row);
+    d.appendChild(row);
+  });
+  d.appendChild(el("p", "match-legend", q.descs.map((x, i) => HANGUL[i] + " " + x).join("\n")));
+
+  function draw() {
+    rows.forEach((row, i) => row.querySelectorAll(".pick").forEach((b) => b.classList.toggle("sel", pick[i] === b.dataset.v)));
+    answer = pick.every((p) => p) ? pick.join("") : null;
+    solve.disabled = !answer;
+  }
+}
+
+function answerText(q, a) {
+  if (q.opts) return NUMS[a - 1] + " " + q.opts[a - 1];
+  if (q.type === "OX") return a;
+  if (q.items) return a.split("").join(" → ");
+  if (q.terms) return a.split("").map((h, i) => (i + 1) + "-" + h).join(" · ");
+}
+
+function judge(q) {
+  const ok = answer === q.ans;
+  results.push({ q, ok, mine: answer });
+
+  const d = $("deduce");
+  d.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  if (q.opts || q.type === "OX") {
+    d.querySelectorAll(".opt").forEach((b) => {
+      const v = q.type === "OX" ? b.dataset.v : Number(b.dataset.v);
+      if (v === q.ans) b.classList.add("right");
+      else if (v === answer) b.classList.add("wrong");
+    });
+  }
+  d.querySelector(".solve-btn").classList.add("hidden");
+
+  const v = $("verdict");
+  v.innerHTML = "";
+  v.appendChild(el("div", "stamp " + (ok ? "ok" : "no"), ok ? "사건 해결!" : "미해결"));
+  if (!ok) {
+    const mine = el("p");
+    mine.appendChild(el("span", "lab", "내 추리"));
+    mine.appendChild(document.createTextNode(answerText(q, answer)));
+    v.appendChild(mine);
+  }
+  const right = el("p");
+  right.appendChild(el("span", "lab", "정답"));
+  right.appendChild(document.createTextNode(answerText(q, q.ans)));
+  v.appendChild(right);
+  const exp = el("p");
+  exp.appendChild(el("span", "lab", "해설"));
+  exp.appendChild(document.createTextNode(q.exp));
+  v.appendChild(exp);
+
+  const last = idx === current.length - 1;
+  const next = el("button", "next-btn", last ? "수사 결과 보기 →" : "다음 사건 →");
+  next.onclick = () => {
+    if (last) renderEnd();
+    else { idx++; renderCase(); }
+  };
+  v.appendChild(next);
+  v.classList.remove("hidden");
+  $("solvedNo").textContent = results.filter((r) => r.ok).length;
+  v.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// ===== 마지막 화면 =====
+function renderEnd() {
+  const score = results.filter((r) => r.ok).length;
+  const total = results.length;
+  const rate = score / total;
+  saveBest(partId, score, total);
+
+  let rank, msg;
+  if (rate === 1) { rank = "🏆 전설의 명탐정"; msg = "모든 사건을 해결했습니다. 완벽한 수사!"; }
+  else if (rate >= 0.8) { rank = "🎖️ 베테랑 탐정"; msg = "거의 다 해결했어요. 놓친 사건만 다시 살펴봐요."; }
+  else if (rate >= 0.5) { rank = "🔎 수습 탐정"; msg = "절반 넘게 해결! 해설을 읽고 한 번 더 도전해 봐요."; }
+  else { rank = "📎 견습 조수"; msg = "단서를 천천히 읽으면 답이 보여요. 다시 도전!"; }
+
+  const r = $("report");
+  r.innerHTML = "";
+  r.appendChild(el("div", "", "Part " + partId + " · " + PARTS[partId - 1].name + " 수사 보고서"));
+  r.appendChild(el("div", "score", score + " / " + total));
+  r.appendChild(el("div", "rank", rank));
+  r.appendChild(el("p", "msg", msg));
+
+  const ul = el("ul");
+  results.forEach((x) => {
+    const li = el("li", x.ok ? "ok" : "no");
+    li.appendChild(el("span", "mark", x.ok ? "✓" : "✗"));
+    li.appendChild(document.createTextNode("Q" + x.q.n + " · " + x.q.q));
+    if (!x.ok) li.appendChild(el("span", "ans", "정답: " + answerText(x.q, x.q.ans)));
+    ul.appendChild(li);
+  });
+  r.appendChild(ul);
+
+  const row = el("div", "btn-row");
+  const again = el("button", "btn-main", "다시 풀기");
+  again.onclick = () => startPart(partId);
+  const home = el("button", "btn-sub", "다른 Part 고르기");
+  home.onclick = renderStart;
+  row.appendChild(again);
+  row.appendChild(home);
+  r.appendChild(row);
+
+  show("end");
+  window.scrollTo(0, 0);
+}
+
+$("homeBtn").onclick = renderStart;
+renderStart();
+</script>
+</body>
+</html>
