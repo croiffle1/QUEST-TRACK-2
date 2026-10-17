@@ -964,8 +964,11 @@ const shoulderR = new THREE.Vector3(0.42, -0.85, 0.3), shoulderL = new THREE.Vec
 const vA = new THREE.Vector3(), vB = new THREE.Vector3();
 function placeArm(arm, fist, shoulder, hand) {
   vm.updateMatrixWorld(true);
+  placeArmAt(arm, fist, shoulder, hand.getWorldPosition(vB));
+}
+function placeArmAt(arm, fist, shoulder, pos) {
   vA.copy(shoulder).applyMatrix4(vm.matrixWorld);
-  hand.getWorldPosition(vB);
+  vB.copy(pos);
   arm.position.copy(vA).add(vB).multiplyScalar(0.5);
   arm.scale.z = vA.distanceTo(vB);
   arm.lookAt(vB);
@@ -1025,21 +1028,150 @@ const SPIN = [       // 크게 한 바퀴 휘돌리기
   { t: 1, p: P(-0.3, -0.55, -0.5, -1.45, 1.3, 0.1, 0) },
 ];
 
-// Y: 무기 자세히 보기 (아무 공격이나 스킬을 쓰면 바로 끊김)
+// ---------- Y: 무기 자세히 보기 ----------
+// 관찰 → 오른손 한 손으로 가운데를 잡고 시계 방향 5바퀴 → 느려지며 왼손으로 토스
+// → 왼손으로 반시계 3바퀴 + 느려지며 한 바퀴 → 오른쪽 위로 던져 양손으로 잡기
+// 아무 공격이나 스킬을 쓰면 바로 끊김
 const TURN = Math.PI * 2;
-const INSPECT = { name: '무기 보기', inspect: true, dur: 3.6, cancel: 0, spin: [0.3, 0.68], keys: [
+const SCY_CENTER = 0.34 * 0.72;                     // 손잡이에서 자루 가운데까지 거리
+const handC = new THREE.Object3D(); handC.position.set(0, 0.34, 0); vmScy.add(handC);
+const R_HOLD = new THREE.Vector3(0.32, -0.18, -0.9), L_HOLD = new THREE.Vector3(-0.32, -0.18, -0.9);
+const R_FREE = new THREE.Vector3(0.5, -1.05, -0.2), L_FREE = new THREE.Vector3(-0.5, -1.05, -0.2);
+const TOSS_MID = new THREE.Vector3(0, 0.3, -1.1);    // 토스할 때 지나가는 높이
+const THROW_MID = new THREE.Vector3(1.1, 1.55, -1.7); // 오른쪽 위로 던질 때 지나가는 곳
+const OBSERVE = [
   { t: 0, p: REST },
-  { t: 0.1, p: P(0.45, -0.45, -1.0, 0, 0.3, 1.2, Math.PI) },                  // 앞으로 눕혀 날 옆면 보이기
-  { t: 0.22, p: P(0.4, -0.45, -0.95, 0.1, -0.35, 1.15, Math.PI - 0.6) },      // 천천히 돌려 보기
-  { t: 0.3, p: P(0.05, -0.3, -1.35, 0, 0, 0.4, Math.PI) },                    // 가운데로 가져와 세우기
-  // 깃발 돌리듯 손잡이를 축으로 크게 두 바퀴 반 (점점 빨라졌다가 멈춤)
-  { t: 0.4, p: P(0.05, -0.3, -1.35, 0, 0, 0.4 - TURN * 0.45, Math.PI), lin: true },
-  { t: 0.56, p: P(0.05, -0.3, -1.35, 0, 0, 0.4 - TURN * 1.75, Math.PI), lin: true },
-  { t: 0.68, p: P(0.05, -0.3, -1.35, 0, 0, 0.4 - TURN * 2.5, Math.PI) },
-  { t: 0.8, p: P(0.35, -0.6, -1.0, 0.1, -0.2, 0.6 - TURN * 2.5, Math.PI) },   // 세워서 날 끝 보기
-  { t: 0.9, p: P(0.45, -0.45, -0.95, 0, 0, 1.0 - TURN * 2.5, Math.PI * 3) },  // 자루를 한 바퀴 돌리기
-  { t: 1, p: P(0.58, -0.6, -0.85, 0.0, -0.35, 0.15 - TURN * 2.5, Math.PI * 4 - 1.5) },
-] };
+  { t: 0.45, p: P(0.45, -0.45, -1.0, 0, 0.3, 1.2, Math.PI) },           // 앞으로 눕혀 날 옆면 보이기
+  { t: 1.0, p: P(0.4, -0.45, -0.95, 0.1, -0.35, 1.15, Math.PI - 0.6) }, // 천천히 돌려 보기
+];
+const OBS_END = 1.0, GRAB = 0.4;
+const W_FAST = 3.5 * TURN;
+// [걸리는 시간, 시작 각속도, 끝 각속도]  (시계 방향은 -)
+const SPIN_R = [[0.2, 0, -W_FAST], [1.33, -W_FAST, -W_FAST], [0.9, -W_FAST, -0.4 * TURN]];
+const TOSS = 0.5;
+const SPIN_L = [[0.15, 0, W_FAST], [0.78, W_FAST, W_FAST], [0.55, W_FAST, 1.3 * TURN]];
+const THROW = 1.0;
+const sumDur = (segs) => segs.reduce((t, sg) => t + sg[0], 0);
+const T_R = OBS_END + GRAB, T_TOSS = T_R + sumDur(SPIN_R), T_L = T_TOSS + TOSS;
+const T_THROW = T_L + sumDur(SPIN_L), T_END = T_THROW + THROW;
+const SPIN_SEGS = [];
+{
+  let t0 = T_R;
+  for (const [d, w0, w1] of [...SPIN_R, [TOSS, -0.4 * TURN, 0], ...SPIN_L, [THROW, 1.3 * TURN, 1.3 * TURN]]) {
+    SPIN_SEGS.push({ t0, d, w0, w1 });
+    t0 += d;
+  }
+}
+// t 초일 때 돌아간 각도와 그때 빠르기
+function spinAt(t) {
+  let ang = 0;
+  for (const sg of SPIN_SEGS) {
+    if (t <= sg.t0) return [ang, 0];
+    const x = Math.min(t - sg.t0, sg.d);
+    ang += sg.w0 * x + (sg.w1 - sg.w0) * x * x / (2 * sg.d);
+    if (t < sg.t0 + sg.d) return [ang, sg.w0 + (sg.w1 - sg.w0) * x / sg.d];
+  }
+  return [ang, 0];
+}
+const INSPECT = { name: '무기 보기', inspect: true, dur: T_END, cancel: 0, keys: [{ t: 0, p: REST }] };
+
+const insEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const insQIy = new THREE.Quaternion();
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+// 7칸 자세 → 자루 가운데 위치 + 방향
+function poseFrom7(p, outC, outQ) {
+  insEuler.set(p[3], p[4], p[5], 'YXZ');
+  outQ.setFromEuler(insEuler);
+  outC.set(0, SCY_CENTER, 0).applyQuaternion(outQ);
+  outC.x += p[0]; outC.y += p[1]; outC.z += p[2];
+  outQ.multiply(insQIy.setFromAxisAngle(Y_AXIS, p[6]));
+}
+// 한 손으로 가운데를 잡고 화면과 나란히 돌리는 자세 (side: 오른쪽 +1, 왼쪽 -1)
+function spinPose(center, ang, side, outC, outQ) {
+  insEuler.set(-0.22, 0.25 * side, ang, 'YXZ');
+  outQ.setFromEuler(insEuler);
+  outC.copy(center);
+}
+const REST_C = new THREE.Vector3(), REST_Q = new THREE.Quaternion();
+poseFrom7(REST, REST_C, REST_Q);
+const smooth01 = (x) => { x = THREE.MathUtils.clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+function bezier(a, m, b, s, out) {
+  const u = 1 - s;
+  return out.set(u * u * a.x + 2 * u * s * m.x + s * s * b.x, u * u * a.y + 2 * u * s * m.y + s * s * b.y, u * u * a.z + 2 * u * s * m.z + s * s * b.z);
+}
+const wrapAng = (a) => { a = ((a % TURN) + TURN) % TURN; return a > Math.PI ? a - TURN : a; };
+
+// 무기 보기 한 장면: 낫 위치 · 방향, 3인칭용 7칸 자세, 두 손이 갈 곳, 도는 빠르기
+const ins = {
+  C: new THREE.Vector3(), Q: new THREE.Quaternion(), pose7: REST.slice(), omega: 0,
+  hR: { a: null, b: null, s: 0 }, hL: { a: null, b: null, s: 0 },
+};
+const insC2 = new THREE.Vector3(), insQ2 = new THREE.Quaternion(), insP2 = REST.slice();
+function setHand(h, a, b, s) { h.a = a; h.b = b; h.s = THREE.MathUtils.clamp(s, 0, 1); }
+function spin7(center, ang, out) {
+  out[0] = center.x; out[1] = center.y; out[2] = center.z;
+  out[3] = 0; out[4] = 0; out[5] = REST[5] + wrapAng(ang); out[6] = 0;
+  return out;
+}
+function inspectFrame(t) {
+  const [ang, omega] = spinAt(t);
+  ins.omega = omega;
+  if (t < OBS_END) {
+    samplePose(OBSERVE, t, ins.pose7);
+    poseFrom7(ins.pose7, ins.C, ins.Q);
+    setHand(ins.hR, handR, handR, 0); setHand(ins.hL, handL, handL, 0);
+  } else if (t < T_R) {
+    // 오른손으로 자루 가운데를 잡아 세움
+    const s = smooth01((t - OBS_END) / GRAB);
+    samplePose(OBSERVE, OBS_END, insP2);
+    poseFrom7(insP2, insC2, insQ2);
+    spinPose(R_HOLD, 0, 1, ins.C, ins.Q);
+    ins.C.lerpVectors(insC2, ins.C, s);
+    ins.Q.slerpQuaternions(insQ2, ins.Q, s);
+    const sp = spin7(R_HOLD, 0, tmpPose);
+    for (let i = 0; i < 7; i++) ins.pose7[i] = insP2[i] + (sp[i] - insP2[i]) * s;
+    setHand(ins.hR, handR, handC, s); setHand(ins.hL, handL, L_FREE, s);
+  } else if (t < T_TOSS) {
+    spinPose(R_HOLD, ang, 1, ins.C, ins.Q);
+    spin7(R_HOLD, ang, ins.pose7);
+    setHand(ins.hR, handC, handC, 0); setHand(ins.hL, L_FREE, L_FREE, 0);
+  } else if (t < T_L) {
+    // 오른손에서 왼손으로 토스
+    const s = (t - T_TOSS) / TOSS;
+    bezier(R_HOLD, TOSS_MID, L_HOLD, smooth01(s), insC2);
+    spinPose(insC2, ang, 1 - 2 * smooth01(s), ins.C, ins.Q);
+    spin7(insC2, ang, ins.pose7);
+    setHand(ins.hR, handC, R_FREE, s / 0.4); setHand(ins.hL, L_FREE, handC, (s - 0.45) / 0.55);
+  } else if (t < T_THROW) {
+    spinPose(L_HOLD, ang, -1, ins.C, ins.Q);
+    spin7(L_HOLD, ang, ins.pose7);
+    setHand(ins.hR, R_FREE, R_FREE, 0); setHand(ins.hL, handC, handC, 0);
+  } else {
+    // 오른쪽 위로 던졌다가 양손으로 잡기
+    const s = Math.min(1, (t - T_THROW) / THROW);
+    const k = smooth01((s - 0.65) / 0.35);
+    bezier(L_HOLD, THROW_MID, REST_C, s, insC2);
+    spinPose(insC2, ang, -1, ins.C, ins.Q);
+    ins.Q.slerp(REST_Q, k);
+    const sp = spin7(insC2, ang, tmpPose);
+    for (let i = 0; i < 7; i++) ins.pose7[i] = sp[i] + (REST[i] - sp[i]) * k;
+    const grab = smooth01((s - 0.72) / 0.28);
+    setHand(ins.hR, R_FREE, handR, grab);
+    if (s < 0.25) setHand(ins.hL, handC, L_FREE, s / 0.25);
+    else setHand(ins.hL, L_FREE, handL, grab);
+  }
+  return ins;
+}
+const handA = new THREE.Vector3(), handB = new THREE.Vector3(), handOut = new THREE.Vector3();
+function handPoint(src, out) {
+  if (src.isObject3D) return src.getWorldPosition(out);
+  return out.copy(src).applyMatrix4(vm.matrixWorld);
+}
+function resolveHand(h) {
+  handPoint(h.a, handA);
+  handPoint(h.b, handB);
+  return handOut.lerpVectors(handA, handB, h.s);
+}
 const glowBase = new THREE.Color(0xb48cff), glowHot = new THREE.Color(0xffffff);
 
 const vmPose = REST.slice();
@@ -1081,8 +1213,10 @@ function updateViewModel(dt) {
   vm.rotation.set(vmState.swayY * 0.8, vmState.swayX * 1.2, vmState.slide * 0.32);
 
   // 낫 자세: 공격 중이면 그 동작, 아니면 기본 자세로 돌아감
+  const insp = action && action.def.inspect;
   let target = REST, rate = 10;
-  if (action) { target = samplePose(action.def.keys, action.t / action.def.dur, tmpPose); rate = 30; }
+  if (insp) { inspectFrame(action.t); target = ins.pose7; rate = 1000; }
+  else if (action) { target = samplePose(action.def.keys, action.t / action.def.dur, tmpPose); rate = 30; }
   else if (ult) target = ULT_POSE;
   const a = Math.min(1, dt * rate);
   // 각도는 한 바퀴(2π) 돌아도 같은 자세라 가까운 쪽으로 돌아가게 함
@@ -1092,52 +1226,70 @@ function updateViewModel(dt) {
   }
   for (let i = 0; i < 7; i++) vmPose[i] += (target[i] - vmPose[i]) * a;
   // 무기 보기 중에는 날이 반짝임
-  const insp = action && action.def.inspect;
   glowMat.color.copy(glowBase);
   if (insp) glowMat.color.lerp(glowHot, 0.35 + 0.35 * Math.sin(action.t * 7));
   vmState.atkW += ((action ? 1 : 0) - vmState.atkW) * Math.min(1, dt * 14);
 
-  vmRig.position.set(vmPose[0], vmPose[1], vmPose[2]);
-  vmRig.rotation.set(vmPose[3], vmPose[4], vmPose[5]);
-  vmScy.rotation.y = vmPose[6];
-  placeArm(armR, fistR, shoulderR, handR);
-  placeArm(armL, fistL, shoulderL, handL);
-
-  // 무기 보기: 날에서 그림자 조각이 흩날림 (돌릴 때 많이)
-  let emit = 0;
   if (insp) {
-    const u = action.t / action.def.dur;
-    emit = u > action.def.spin[0] && u < action.def.spin[1] ? 110 : 18;
+    // 무기 보기: 자루 가운데를 축으로 돌리고, 손은 장면마다 잡을 곳으로
+    if (rate >= 1000) for (let i = 0; i < 7; i++) vmPose[i] = target[i];
+    vmRig.position.copy(ins.C);
+    vmRig.quaternion.copy(ins.Q);
+    vmScy.rotation.y = 0;
+    vmScy.position.y = -SCY_CENTER;
+    vm.updateMatrixWorld(true);
+    placeArmAt(armR, fistR, shoulderR, resolveHand(ins.hR));
+    placeArmAt(armL, fistL, shoulderL, resolveHand(ins.hL));
+  } else {
+    vmRig.position.set(vmPose[0], vmPose[1], vmPose[2]);
+    vmRig.rotation.set(vmPose[3], vmPose[4], vmPose[5]);
+    vmScy.rotation.y = vmPose[6];
+    vmScy.position.y = 0;
+    placeArm(armR, fistR, shoulderR, handR);
+    placeArm(armL, fistL, shoulderL, handL);
   }
-  updateBladeShadow(dt, emit);
+
+  // 무기 보기: 돌 때 날 끝이 지나간 길에 그림자 잔상 (빠를수록 많이)
+  updateBladeShadow(dt, insp && Math.abs(ins.omega) > 2);
 }
 
 const bladeBits = [];
-const bladeBitGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+const bladeBitGeo = new THREE.BoxGeometry(0.032, 0.032, 0.032);
+const BLADE_BIT_MAX = 60;
 const bladeTip = new THREE.Object3D(); bladeTip.position.set(-1.0, 1.04, 0); vmScy.add(bladeTip);
 const bladeMid = new THREE.Object3D(); bladeMid.position.set(-0.55, 1.24, 0); vmScy.add(bladeMid);
-let bladeAcc = 0;
-function updateBladeShadow(dt, rate) {
-  bladeAcc += dt * rate;
-  while (bladeAcc >= 1) {
-    bladeAcc -= 1;
-    const m = new THREE.MeshBasicMaterial({ color: Math.random() < 0.6 ? 0x14051f : 0x5b2a8f, transparent: true, opacity: 0.65, depthWrite: false });
-    const mesh = new THREE.Mesh(bladeBitGeo, m);
-    (Math.random() < 0.6 ? bladeTip : bladeMid).getWorldPosition(mesh.position);
-    mesh.position.x += (Math.random() - 0.5) * 0.06;
-    mesh.position.y += (Math.random() - 0.5) * 0.06;
-    mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
-    vmScene.add(mesh);
-    bladeBits.push({ mesh, m, t: 0, life: 0.35 + Math.random() * 0.3, s: 0.6 + Math.random() * 0.8 });
-  }
+// 날 끝이 지나간 길을 따라 촘촘히 놓아서 잔상처럼 보이게 함.
+// 빨리 돌수록 한 프레임에 지나간 길이 길어서 입자가 많아짐 (한 프레임 최대 BLADE_PER_FRAME 개)
+const BLADE_SPACING = 0.05, BLADE_PER_FRAME = 7;
+const lastTip = new THREE.Vector3(), curTip = new THREE.Vector3();
+let lastTipOk = false;
+function spawnBladeBit(pos) {
+  if (bladeBits.length >= BLADE_BIT_MAX) return;
+  const m = new THREE.MeshBasicMaterial({ color: Math.random() < 0.6 ? 0x14051f : 0x5b2a8f, transparent: true, opacity: 0.45, depthWrite: false });
+  const mesh = new THREE.Mesh(bladeBitGeo, m);
+  mesh.position.copy(pos);
+  mesh.position.x += (Math.random() - 0.5) * 0.02;
+  mesh.position.y += (Math.random() - 0.5) * 0.02;
+  mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+  vmScene.add(mesh);
+  bladeBits.push({ mesh, m, t: 0, life: 0.12 + Math.random() * 0.1, s: 0.8 + Math.random() * 0.5 });
+}
+function updateBladeShadow(dt, active) {
+  if (active) {
+    bladeTip.getWorldPosition(curTip);
+    if (lastTipOk) {
+      const n = Math.min(BLADE_PER_FRAME, Math.floor(lastTip.distanceTo(curTip) / BLADE_SPACING));
+      for (let i = 1; i <= n; i++) spawnBladeBit(vA.lerpVectors(lastTip, curTip, i / n));
+    }
+    lastTip.copy(curTip);
+    lastTipOk = true;
+  } else lastTipOk = false;
   for (let i = bladeBits.length - 1; i >= 0; i--) {
     const b = bladeBits[i];
     b.t += dt;
     const k = b.t / b.life;
-    b.m.opacity = 0.65 * (1 - k);
-    b.mesh.scale.setScalar(b.s * (1 + k));
-    b.mesh.position.y += dt * 0.12;
-    b.mesh.rotation.y += dt * 3;
+    b.m.opacity = 0.45 * (1 - k);
+    b.mesh.scale.setScalar(b.s * (1 - k * 0.5));
     if (k >= 1) { vmScene.remove(b.mesh); b.m.dispose(); bladeBits.splice(i, 1); }
   }
 }
@@ -1211,9 +1363,8 @@ const shadowBits = [];
 const shadowGeo = new THREE.BoxGeometry(0.26, 0.26, 0.26);
 let shadowSpawn = 0;
 function updateShadow(dt) {
-  const inspecting = action && action.def.inspect;
-  if (ult || inspecting) {
-    shadowSpawn += dt * (ult ? 45 : 32);
+  if (ult) {
+    shadowSpawn += dt * 45;
     while (shadowSpawn >= 1) {
       shadowSpawn -= 1;
       const m = new THREE.MeshBasicMaterial({ color: Math.random() < 0.6 ? 0x12041c : 0x3a1260, transparent: true, opacity: 0, depthWrite: false });
