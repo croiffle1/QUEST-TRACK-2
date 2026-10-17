@@ -549,7 +549,10 @@ function poseCharacter(ch, o) {
     P.rArm.rotation.set(ax, 0, -0.1);
     P.lArm.rotation.set(ax, 0, 0.55);
     ch.body.rotation.y = (o.twist || 0) * w;
-    if (ch.scythe) ch.scythe.rotation.z = o.roll || 0;   // 1인칭 낫의 날 방향과 같게
+    if (ch.scythe) {
+      ch.scythe.rotation.z = o.roll || 0;   // 1인칭 낫의 날 방향과 같게
+      ch.scythe.parent.rotation.y = (o.spin || 0) * w;   // 무기 보기에서 깃발처럼 돌리기
+    }
   } else {
     const idle = Math.sin(o.time * 1.6) * 0.05;
     const k = o.stun ? 1 : 0;
@@ -1023,14 +1026,19 @@ const SPIN = [       // 크게 한 바퀴 휘돌리기
 ];
 
 // Y: 무기 자세히 보기 (아무 공격이나 스킬을 쓰면 바로 끊김)
-const INSPECT = { name: '무기 보기', inspect: true, dur: 2.8, cancel: 0, keys: [
+const TURN = Math.PI * 2;
+const INSPECT = { name: '무기 보기', inspect: true, dur: 3.6, cancel: 0, spin: [0.3, 0.68], keys: [
   { t: 0, p: REST },
-  { t: 0.14, p: P(0.45, -0.45, -1.0, 0, 0.3, 1.2, Math.PI) },               // 앞으로 눕혀 날 옆면 보이기
-  { t: 0.38, p: P(0.4, -0.45, -0.95, 0.1, -0.35, 1.15, Math.PI - 0.6) },    // 천천히 돌려 보기
-  { t: 0.5, p: P(0.45, -0.45, -1.0, 0, 0.5, 1.2, Math.PI + 0.5) },          // 휙 반대로 돌리기
-  { t: 0.7, p: P(0.35, -0.6, -1.0, 0.1, -0.2, 0.6, Math.PI) },              // 세워서 날 끝 보기
-  { t: 0.86, p: P(0.45, -0.45, -0.95, 0, 0, 1.0, Math.PI * 3) },            // 자루를 한 바퀴 돌리기
-  { t: 1, p: P(0.58, -0.6, -0.85, 0.0, -0.35, 0.15, Math.PI * 4 - 1.5) },
+  { t: 0.1, p: P(0.45, -0.45, -1.0, 0, 0.3, 1.2, Math.PI) },                  // 앞으로 눕혀 날 옆면 보이기
+  { t: 0.22, p: P(0.4, -0.45, -0.95, 0.1, -0.35, 1.15, Math.PI - 0.6) },      // 천천히 돌려 보기
+  { t: 0.3, p: P(0.05, -0.3, -1.35, 0, 0, 0.4, Math.PI) },                    // 가운데로 가져와 세우기
+  // 깃발 돌리듯 손잡이를 축으로 크게 두 바퀴 반 (점점 빨라졌다가 멈춤)
+  { t: 0.4, p: P(0.05, -0.3, -1.35, 0, 0, 0.4 - TURN * 0.45, Math.PI), lin: true },
+  { t: 0.56, p: P(0.05, -0.3, -1.35, 0, 0, 0.4 - TURN * 1.75, Math.PI), lin: true },
+  { t: 0.68, p: P(0.05, -0.3, -1.35, 0, 0, 0.4 - TURN * 2.5, Math.PI) },
+  { t: 0.8, p: P(0.35, -0.6, -1.0, 0.1, -0.2, 0.6 - TURN * 2.5, Math.PI) },   // 세워서 날 끝 보기
+  { t: 0.9, p: P(0.45, -0.45, -0.95, 0, 0, 1.0 - TURN * 2.5, Math.PI * 3) },  // 자루를 한 바퀴 돌리기
+  { t: 1, p: P(0.58, -0.6, -0.85, 0.0, -0.35, 0.15 - TURN * 2.5, Math.PI * 4 - 1.5) },
 ] };
 const glowBase = new THREE.Color(0xb48cff), glowHot = new THREE.Color(0xffffff);
 
@@ -1042,7 +1050,7 @@ function samplePose(keysArr, u, out) {
     const a = keysArr[k], b = keysArr[k + 1];
     if (u <= b.t) {
       let s = (u - a.t) / (b.t - a.t);
-      s = s * s * (3 - 2 * s);
+      if (!b.lin) s = s * s * (3 - 2 * s);   // lin: 일정한 빠르기로 (빙글빙글 돌 때)
       for (let i = 0; i < 7; i++) out[i] = a.p[i] + (b.p[i] - a.p[i]) * s;
       return out;
     }
@@ -1077,9 +1085,11 @@ function updateViewModel(dt) {
   if (action) { target = samplePose(action.def.keys, action.t / action.def.dur, tmpPose); rate = 30; }
   else if (ult) target = ULT_POSE;
   const a = Math.min(1, dt * rate);
-  // 날 방향은 한 바퀴(2π) 돌아도 같은 자세라 가까운 쪽으로 돌아가게 함
-  while (target[6] - vmPose[6] > Math.PI) vmPose[6] += Math.PI * 2;
-  while (target[6] - vmPose[6] < -Math.PI) vmPose[6] -= Math.PI * 2;
+  // 각도는 한 바퀴(2π) 돌아도 같은 자세라 가까운 쪽으로 돌아가게 함
+  for (let i = 3; i < 7; i++) {
+    while (target[i] - vmPose[i] > Math.PI) vmPose[i] += Math.PI * 2;
+    while (target[i] - vmPose[i] < -Math.PI) vmPose[i] -= Math.PI * 2;
+  }
   for (let i = 0; i < 7; i++) vmPose[i] += (target[i] - vmPose[i]) * a;
   // 무기 보기 중에는 날이 반짝임
   const insp = action && action.def.inspect;
@@ -1092,6 +1102,44 @@ function updateViewModel(dt) {
   vmScy.rotation.y = vmPose[6];
   placeArm(armR, fistR, shoulderR, handR);
   placeArm(armL, fistL, shoulderL, handL);
+
+  // 무기 보기: 날에서 그림자 조각이 흩날림 (돌릴 때 많이)
+  let emit = 0;
+  if (insp) {
+    const u = action.t / action.def.dur;
+    emit = u > action.def.spin[0] && u < action.def.spin[1] ? 110 : 18;
+  }
+  updateBladeShadow(dt, emit);
+}
+
+const bladeBits = [];
+const bladeBitGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+const bladeTip = new THREE.Object3D(); bladeTip.position.set(-1.0, 1.04, 0); vmScy.add(bladeTip);
+const bladeMid = new THREE.Object3D(); bladeMid.position.set(-0.55, 1.24, 0); vmScy.add(bladeMid);
+let bladeAcc = 0;
+function updateBladeShadow(dt, rate) {
+  bladeAcc += dt * rate;
+  while (bladeAcc >= 1) {
+    bladeAcc -= 1;
+    const m = new THREE.MeshBasicMaterial({ color: Math.random() < 0.6 ? 0x14051f : 0x5b2a8f, transparent: true, opacity: 0.65, depthWrite: false });
+    const mesh = new THREE.Mesh(bladeBitGeo, m);
+    (Math.random() < 0.6 ? bladeTip : bladeMid).getWorldPosition(mesh.position);
+    mesh.position.x += (Math.random() - 0.5) * 0.06;
+    mesh.position.y += (Math.random() - 0.5) * 0.06;
+    mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+    vmScene.add(mesh);
+    bladeBits.push({ mesh, m, t: 0, life: 0.35 + Math.random() * 0.3, s: 0.6 + Math.random() * 0.8 });
+  }
+  for (let i = bladeBits.length - 1; i >= 0; i--) {
+    const b = bladeBits[i];
+    b.t += dt;
+    const k = b.t / b.life;
+    b.m.opacity = 0.65 * (1 - k);
+    b.mesh.scale.setScalar(b.s * (1 + k));
+    b.mesh.position.y += dt * 0.12;
+    b.mesh.rotation.y += dt * 3;
+    if (k >= 1) { vmScene.remove(b.mesh); b.m.dispose(); bladeBits.splice(i, 1); }
+  }
 }
 
 // ---------- 효과 ----------
@@ -1163,8 +1211,9 @@ const shadowBits = [];
 const shadowGeo = new THREE.BoxGeometry(0.26, 0.26, 0.26);
 let shadowSpawn = 0;
 function updateShadow(dt) {
-  if (ult) {
-    shadowSpawn += dt * 45;
+  const inspecting = action && action.def.inspect;
+  if (ult || inspecting) {
+    shadowSpawn += dt * (ult ? 45 : 32);
     while (shadowSpawn >= 1) {
       shadowSpawn -= 1;
       const m = new THREE.MeshBasicMaterial({ color: Math.random() < 0.6 ? 0x12041c : 0x3a1260, transparent: true, opacity: 0, depthWrite: false });
@@ -1945,7 +1994,7 @@ function frame(now) {
     atkW: vmState.atkW,
     armX: THREE.MathUtils.clamp(vmPose[3] + Math.PI / 2, -0.7, 3.0),
     twist: THREE.MathUtils.clamp(vmPose[4] * 0.6, -0.9, 0.9),
-    roll: -vmPose[6] });
+    roll: -vmPose[6], spin: -(vmPose[5] - REST[5]) });
 
   spdEl.textContent = hs.toFixed(1);
   slideFill.style.width = p.sliding ? `${(1 - p.slideTime / SLIDE_TIME) * 100}%`
