@@ -1029,7 +1029,7 @@ const SPIN = [       // 크게 한 바퀴 휘돌리기
 ];
 
 // ---------- Y: 무기 자세히 보기 (1인칭만) ----------
-// 관찰 → 오른손으로 가운데를 잡고 시계 방향 5바퀴 → 도는 힘 그대로 왼손에 던져 탁 잡기
+// 오른손으로 가운데를 잡고 시계 방향 5바퀴 → 도는 힘 그대로 왼손에 던져 탁 잡기
 // → 왼손으로 반시계 3바퀴 + 한 바퀴 → 오른쪽 위로 던져 오른손을 뻗어 탁 잡기 → 천천히 내리며 왼손도 잡고 끝
 // 아무 공격이나 스킬을 쓰면 바로 끊김
 const TURN = Math.PI * 2;
@@ -1038,12 +1038,10 @@ const handC = new THREE.Object3D(); handC.position.set(0, 0.34, 0); vmScy.add(ha
 const R_HOLD = new THREE.Vector3(0.32, -0.18, -0.9), L_HOLD = new THREE.Vector3(-0.32, -0.18, -0.9);
 const R_CATCH = new THREE.Vector3(0.4, 0.06, -0.88);  // 오른손 자리보다 살짝 위 (손을 뻗어 잡음)
 const R_FREE = new THREE.Vector3(0.5, -1.05, -0.2), L_FREE = new THREE.Vector3(-0.5, -1.05, -0.2);
-const OBSERVE = [
-  { t: 0, p: REST },
-  { t: 0.45, p: P(0.45, -0.45, -1.0, 0, 0.3, 1.2, Math.PI) },           // 앞으로 눕혀 날 옆면 보이기
-  { t: 1.0, p: P(0.4, -0.45, -0.95, 0.1, -0.35, 1.15, Math.PI - 0.6) }, // 천천히 돌려 보기
-];
-const OBS_END = 1.0, GRAB = 0.4;
+// 던진 뒤 오른손이 던진 쪽(왼쪽)으로 따라갔다가 내려감
+const R_FOLLOW = new THREE.Vector3(-0.02, -0.08, -0.8);
+const FOLLOW_TO = 0.16, FOLLOW_DROP = 0.55;
+const GRAB = 0.4;
 const W_FAST = 3.5 * TURN;
 const TOSS_TIME = 0.38, THROW_TIME = 0.55, SETTLE = 0.9, CATCH_JOLT = 0.18;
 // [걸리는 시간, 시작 각속도, 끝 각속도]  (시계 방향은 -). 'fly' 는 날아가는 동안 (잡을 때 자루가 똑바로 서도록 맞춤)
@@ -1054,7 +1052,7 @@ const SPIN_PLAN = [
   ['fly', THROW_TIME, 1.3 * TURN],                                             // 오른쪽 위로 던짐
 ];
 const SPIN_SEGS = [];
-const T_R = OBS_END + GRAB;
+const T_R = GRAB;
 {
   let t0 = T_R, ang = 0;
   for (const sg of SPIN_PLAN) {
@@ -1120,23 +1118,22 @@ const ins = {
   C: new THREE.Vector3(), Q: new THREE.Quaternion(), omega: 0,
   hR: { a: null, b: null, s: 0 }, hL: { a: null, b: null, s: 0 },
 };
-const insC2 = new THREE.Vector3(), insQ2 = new THREE.Quaternion(), insP2 = REST.slice();
+const insC2 = new THREE.Vector3(), insQ2 = new THREE.Quaternion();
 function setHand(h, a, b, s) { h.a = a; h.b = b; h.s = THREE.MathUtils.clamp(s, 0, 1); }
+// 던진 뒤 오른손: 왼쪽으로 휙 따라갔다가 천천히 내려감
+function rightFollow(x) {
+  if (x < FOLLOW_TO) setHand(ins.hR, R_HOLD, R_FOLLOW, smooth01(x / FOLLOW_TO));
+  else setHand(ins.hR, R_FOLLOW, R_FREE, smooth01((x - FOLLOW_TO) / FOLLOW_DROP));
+}
 function inspectFrame(t) {
   const [ang, omega] = spinAt(t);
   ins.omega = omega;
-  if (t < OBS_END) {
-    samplePose(OBSERVE, t, insP2);
-    poseFrom7(insP2, ins.C, ins.Q);
-    setHand(ins.hR, handR, handR, 0); setHand(ins.hL, handL, handL, 0);
-  } else if (t < T_R) {
+  if (t < T_R) {
     // 오른손으로 자루 가운데를 잡아 세움
-    const s = smooth01((t - OBS_END) / GRAB);
-    samplePose(OBSERVE, OBS_END, insP2);
-    poseFrom7(insP2, insC2, insQ2);
+    const s = smooth01(t / GRAB);
     spinPose(R_HOLD, 0, 1, ins.C, ins.Q);
-    ins.C.lerpVectors(insC2, ins.C, s);
-    ins.Q.slerpQuaternions(insQ2, ins.Q, s);
+    ins.C.lerpVectors(REST_C, ins.C, s);
+    ins.Q.slerpQuaternions(REST_Q, ins.Q, s);
     setHand(ins.hR, handR, handC, s); setHand(ins.hL, handL, L_FREE, s);
   } else if (t < T_TOSS) {
     spinPose(R_HOLD, ang, 1, ins.C, ins.Q);
@@ -1146,12 +1143,12 @@ function inspectFrame(t) {
     const s = (t - T_TOSS) / TOSS_TIME;
     arc(R_HOLD, L_HOLD, 0.22, s, insC2);
     spinPose(insC2, ang, 1 - 2 * s, ins.C, ins.Q);
-    setHand(ins.hR, R_HOLD, R_FREE, s / 0.6); setHand(ins.hL, L_FREE, L_HOLD, smooth01(s / 0.8));
+    rightFollow(t - T_TOSS); setHand(ins.hL, L_FREE, L_HOLD, smooth01(s / 0.8));
   } else if (t < T_THROW) {
     // 왼손으로 탁 잡고 반시계 방향으로 돌림
     insC2.copy(L_HOLD); insC2.y += jolt(t, T_L);
     spinPose(insC2, ang, -1, ins.C, ins.Q);
-    setHand(ins.hR, R_FREE, R_FREE, 0); setHand(ins.hL, handC, handC, 0);
+    rightFollow(t - T_TOSS); setHand(ins.hL, handC, handC, 0);
   } else if (t < T_C) {
     // 오른쪽 위로 던짐. 오른손이 평소보다 높이 뻗어 마중 나감
     const s = (t - T_THROW) / THROW_TIME;
