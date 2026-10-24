@@ -3,9 +3,9 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtWidgets import QApplication, QLabel, QMenu, QSystemTrayIcon
 
 HERE = Path(__file__).parent
 ART = HERE / "art"
@@ -48,12 +48,29 @@ class Pet(QLabel):
         self.move(area.right() - self.width() + 1, area.bottom() - self.height() + 1)
 
 
+def make_tray(app):
+    """시계 옆 트레이 아이콘. 오른쪽 클릭 메뉴에 "끄기"가 있다."""
+    # ① 그림에서 고양이 얼굴 쪽을 정사각형으로 잘라 아이콘으로 쓴다
+    face = QPixmap(str(ART / "frame1.png")).copy(QRect(180, 0, 335, 335))
+    tray = QSystemTrayIcon(QIcon(face), app)
+
+    menu = QMenu()
+    quit_action = QAction("끄기", menu)
+    quit_action.triggered.connect(app.quit)
+    menu.addAction(quit_action)
+
+    tray.setContextMenu(menu)
+    tray.show()
+    return tray, menu
+
+
 def main():
     app = QApplication(sys.argv)
     dpr = app.primaryScreen().devicePixelRatio()
     pet = Pet(load_frames(dpr))
     pet.move_to_corner()
     pet.show()
+    tray, menu = make_tray(app)
 
     # 확인용: python pet.py --돌려보기 로 켜면 ①~④ 를 0.5초마다 돌려 보여 준다
     if "--돌려보기" in sys.argv:
