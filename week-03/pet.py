@@ -8,7 +8,8 @@ from PySide6.QtCore import QObject, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QSystemTrayIcon
 
-HERE = Path(__file__).parent
+# .exe 로 묶으면 그림은 PyInstaller 가 풀어 놓은 임시 폴더(sys._MEIPASS)에 있다
+HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 ART = HERE / "art"
 
 WIDTH = 200       # 펫 가로 크기(픽셀)
