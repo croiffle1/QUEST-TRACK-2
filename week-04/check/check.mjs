@@ -101,32 +101,45 @@ async function connect() {
   throw new Error("브라우저에 연결하지 못했어요.");
 }
 
-// ── 길 찾기: 개구리가 갈 수 있는 곳을 모두 따라가 보며 딸기에 닿는지 확인 ──
+// ── 게임 창구: 게임에 window.CHECK 가 있으면 그걸 쓰고, 없으면 연습 게임(딸기) 이름을 씀 ──
+const ADAPTER = `window.__G = window.CHECK || {
+  name: "딸기",
+  items: () => berries, setItems: (v) => { berries = v; }, respawn: () => spawnBerries(),
+  spots: BERRY_SPOTS, count: BERRY_COUNT, doubleJump: true,
+  setHazards: () => {}, hazards: () => [], state: null,
+}; true`;
+
+// ── 길 찾기: 캐릭터가 갈 수 있는 곳을 모두 따라가 보며 아이템 자리에 닿는지 확인 ──
 // 게임의 update() 를 그대로 써서 1/60초씩 움직여 본다.
 const REACH_TEST = `(() => {
   const savedMuted = muted; muted = true;
+  __G.setHazards(false);
   const DT = 1 / 60;
-  const spots = BERRY_SPOTS.map(([c, r]) => ({ x: c * TILE + 8, y: r * TILE + 8, c, r }));
+  const spots = __G.spots.map(([c, r]) => ({ x: c * TILE + 8, y: r * TILE + 8, c, r }));
   const got = new Set();
   const save = () => ({ ...player });
   const load = (s) => Object.assign(player, s);
   for (const k in keys) keys[k] = false;
 
+  // 아이템이 놓일 수 있는 자리 하나하나에 몸이 닿는지 본다. 닿는 판정은 연습 게임과 같은 식
   function step(dir, jump) {
     keys.ArrowLeft = dir < 0; keys.ArrowRight = dir > 0;
     jumpPressed = jump;
-    berries = spots.map((s) => ({ x: s.x, y: s.y }));
-    clearTimer = 0;
+    __G.setItems([{ x: -999, y: -999 }]);
+    if (typeof clearTimer !== "undefined") clearTimer = 0;
     update(DT);
-    spots.forEach((s, i) => { if (!berries.some((b) => b.x === s.x && b.y === s.y)) got.add(i); });
+    const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+    spots.forEach((s, i) => {
+      if (Math.abs(s.x - cx) < player.w / 2 + 6 && Math.abs(s.y - cy) < player.h / 2 + 6) got.add(i);
+    });
   }
   // 할 수 있는 동작: 걷기, 점프, 2단 점프(누르는 때 여러 가지), 공중에서 방향 바꾸기
   const ACTIONS = [];
   for (const dir of [-1, 0, 1]) {
     ACTIONS.push({ dir, walk: true });
     ACTIONS.push({ dir, jump: true });
-    for (const t of [8, 16, 24, 32]) ACTIONS.push({ dir, jump: true, second: t });
-    if (dir) ACTIONS.push({ dir, jump: true, second: 16, stopAt: 20 });
+    if (__G.doubleJump) for (const t of [8, 16, 24, 32]) ACTIONS.push({ dir, jump: true, second: t });
+    if (dir) ACTIONS.push({ dir, jump: true, second: __G.doubleJump ? 16 : 0, stopAt: 20 });
   }
   function run(start, a) {
     load(start);
@@ -158,8 +171,9 @@ const REACH_TEST = `(() => {
   // 원래대로 돌려놓기
   load(first);
   for (const k in keys) keys[k] = false;
-  jumpPressed = false; muted = savedMuted; score = 0; clearTimer = 0;
-  spawnBerries();
+  jumpPressed = false; muted = savedMuted; score = 0;
+  if (typeof clearTimer !== "undefined") clearTimer = 0;
+  __G.respawn();
   const missed = spots.filter((s, i) => !got.has(i)).map((s) => "(" + s.c + ", " + s.r + ")");
   return { total: spots.length, got: got.size, missed, places: seen.size };
 })()`;
@@ -176,10 +190,36 @@ try {
   console.log("[열기]");
   await send("Page.navigate", { url: pathToFileURL(GAME).href });
   await sleep(1500);
+  await js(ADAPTER);
+  const NAME = await js(`__G.name`);
   await shot("1-처음화면");
   const msgText = await js(`document.getElementById("msg")?.innerText || ""`);
   if (msgText.includes("못 불러왔어요")) fail("그림 불러오기: " + msgText);
   else pass("파일을 두 번 눌러 연 것처럼 file:// 로 열림");
+
+  // 1-1. 아이템 자리: 개수, 땅 속에 묻히지 않았는지, 다시 열면 자리가 바뀌는지
+  console.log(`[${NAME} 자리]`);
+  const ITEM_INFO = `(() => {
+    const items = __G.items();
+    const pos = items.map((b) => b.x + "," + b.y);
+    const buried = items.filter((b) => isSolid(Math.floor(b.x / TILE), Math.floor(b.y / TILE))).length;
+    return { pos, buried, want: __G.count };
+  })()`;
+  const b1 = await js(ITEM_INFO);
+  b1.pos.length === b1.want
+    ? pass(`${NAME} ${b1.pos.length}개가 나옴`) : fail(`${NAME}가 ${b1.want}개가 아니라 ${b1.pos.length}개 나옴`);
+  b1.buried === 0 ? pass(`땅 속에 묻힌 ${NAME} 없음`) : fail(`땅 속에 묻힌 ${NAME} ${b1.buried}개`);
+  await send("Page.reload");
+  await sleep(1500);
+  await js(ADAPTER);
+  await shot("1-다시열기");
+  const b2 = await js(ITEM_INFO);
+  const same = b2.pos.filter((p) => b1.pos.includes(p)).length;
+  same < b2.pos.length
+    ? pass(`다시 열면 ${NAME} 자리가 바뀜 (${b2.pos.length}개 중 ${same}개만 같은 자리)`)
+    : fail(`다시 열어도 ${NAME} 자리가 그대로임`);
+  const START = await js(`({ x: player.x, y: player.y })`);
+  await js(`__G.setHazards(false)`); // 움직임을 보는 동안은 적에 부딪혀도 안 다치게
 
   // 2. 그림
   console.log("[그림]");
@@ -241,6 +281,8 @@ try {
 
   // 5. 점프
   console.log("[점프]");
+  await js(`(() => { player.x = ${START.x}; player.vx = 0; })()`); // 머리 위가 트인 시작 자리에서 뛰어 봄
+  await sleep(500);
   const groundY = await js(`player.y`);
   await hold("Space", 50);
   await sleep(120);
@@ -248,11 +290,13 @@ try {
   await shot("4-점프");
   jumpState.y < groundY ? pass("스페이스를 누르면 뛰어오름") : fail("스페이스를 눌러도 안 뜀");
   jumpState.anim === "jump" ? pass("올라갈 때 점프 애니메이션") : fail("올라갈 때 애니메이션이 " + jumpState.anim);
-  await hold("Space", 50);
-  await sleep(60);
-  const dj = await js(`player.anim`);
-  await shot("5-2단점프");
-  dj === "double-jump" ? pass("공중에서 한 번 더 누르면 2단 점프 애니메이션") : fail("2단 점프 애니메이션이 아님: " + dj);
+  if (await js(`__G.doubleJump`)) {
+    await hold("Space", 50);
+    await sleep(60);
+    const dj = await js(`player.anim`);
+    await shot("5-2단점프");
+    dj === "double-jump" ? pass("공중에서 한 번 더 누르면 2단 점프 애니메이션") : fail("2단 점프 애니메이션이 아님: " + dj);
+  } else console.log("     (이 게임은 2단 점프가 없어서 건너뜀)");
   // 사진 찍는 데 시간이 걸리므로, 떨어짐은 짧게 자주 들여다보며 기다림
   let fallSeen = false;
   for (let i = 0; i < 60 && !fallSeen; i++) {
@@ -270,24 +314,34 @@ try {
   console.log("[갈 수 있는 곳]");
   const reach = await js(REACH_TEST);
   reach.got === reach.total
-    ? pass(`시작 자리에서 딸기 ${reach.total}개 모두에 닿을 수 있음 (서 볼 수 있는 자리 ${reach.places}곳)`)
-    : fail(`딸기 ${reach.total}개 중 ${reach.got}개만 닿음. 못 닿는 칸(가로, 세로): ${reach.missed.join(" ")}`);
+    ? pass(`시작 자리에서 ${NAME}가 놓일 수 있는 자리 ${reach.total}곳 모두에 닿을 수 있음 (서 볼 수 있는 자리 ${reach.places}곳)`)
+    : fail(`${NAME}가 놓일 수 있는 자리 ${reach.total}곳 중 ${reach.got}곳만 닿음. 못 닿는 칸(가로, 세로): ${reach.missed.join(" ")}`);
 
-  // 7. 딸기 먹기와 다시 나오기
-  console.log("[딸기]");
+  // 7. 아이템 먹기와 다시 나오기
+  console.log(`[${NAME}]`);
   const eat = await js(`(() => {
     muted = true;
-    const n = berries.length;
-    for (const b of [...berries]) { player.x = b.x - player.w / 2; player.y = b.y - player.h / 2; player.vy = 0; update(1 / 60); }
-    const after = berries.length, sc = score;
-    player.x = 40; player.y = 200; player.vy = 0; // 딸기가 다시 나올 때 바로 먹지 않게 시작 자리로
+    const list = [...__G.items()], n = list.length, sc0 = score;
+    let gone = 0;
+    for (const b of list) {
+      // 몸이 땅에 묻히면 게임이 밀어내므로, 아이템에 닿으면서 땅에는 안 묻히는 자리를 찾아 놓음
+      player.y = b.y + 6 - player.h; player.vy = 0;
+      for (const dx of [0, -2, 2, -4, 4, -6, 6]) {
+        player.x = b.x - player.w / 2 + dx;
+        if (!overlapsSolid(player.x, player.y, player.w, player.h)) break;
+      }
+      update(1 / 60);
+      if (!__G.items().includes(b)) gone++;
+    }
+    const sc = score - sc0;
+    player.x = ${START.x}; player.y = ${START.y}; player.vy = 0; // 다시 나올 때 바로 먹지 않게 시작 자리로
     for (let i = 0; i < 120; i++) update(1 / 60);
-    const back = berries.length;
+    const back = __G.items().length;
     muted = false;
-    return { n, after, sc, back };
+    return { n, gone, sc, back };
   })()`);
-  eat.after === 0 && eat.sc === eat.n ? pass(`딸기에 닿으면 사라지고 점수가 오름 (${eat.n}개 → 점수 ${eat.sc})`) : fail(`딸기 먹기 이상: 남은 ${eat.after}, 점수 ${eat.sc}`);
-  eat.back === eat.n ? pass("다 모으면 딸기가 다시 나옴") : fail(`다 모은 뒤 딸기가 ${eat.back}개만 다시 나옴`);
+  eat.gone === eat.n && eat.sc === eat.n ? pass(`${NAME}에 닿으면 사라지고 점수가 오름 (${eat.n}개 → 점수 +${eat.sc})`) : fail(`${NAME} 먹기 이상: 사라진 것 ${eat.gone}개, 점수 +${eat.sc}`);
+  eat.back === eat.n ? pass(`먹은 뒤 ${NAME}가 다시 ${eat.back}개 나옴`) : fail(`먹은 뒤 ${NAME}가 ${eat.back}개만 다시 나옴`);
   await sleep(100);
   await shot("7-다모음");
   const hudText = await js(`document.getElementById("hud")?.innerText`);
@@ -300,6 +354,47 @@ try {
   await hold("KeyM", 50);
   const m2 = await js(`({ muted, bgm: sounds.bgm.muted })`);
   m1.muted && m1.bgm && !m2.muted && !m2.bgm ? pass("M 으로 소리가 꺼지고 다시 켜짐") : fail("M 소리 끄기/켜기가 이상함");
+
+  // 8-1. 적 (게임에 state 가 있을 때만): 부딪히면 목숨이 줄고, 잠깐 무적, 목숨이 다 떨어지면 게임 끝, 키로 다시 시작
+  if (await js(`!!__G.state && __G.hazards().length > 0`)) {
+    console.log("[적]");
+    await js(`__G.setHazards(true)`);
+    const hz = await js(`(() => {
+      muted = true;
+      const touch = () => { const b = __G.hazards()[0]; player.x = b.x - player.w / 2; player.y = b.y - player.h / 2; player.vy = 0; update(1 / 60); };
+      const s0 = __G.state();
+      touch();
+      const s1 = __G.state(), anim1 = player.anim;
+      touch();
+      const s2 = __G.state();
+      muted = false;
+      return { s0, s1, anim1, s2 };
+    })()`);
+    hz.s1.lives === hz.s0.lives - 1 ? pass(`적에 닿으면 목숨이 줄어듦 (${hz.s0.lives} → ${hz.s1.lives})`) : fail(`적에 닿았는데 목숨이 ${hz.s0.lives} → ${hz.s1.lives}`);
+    hz.anim1 === "hit" ? pass("맞으면 피격 애니메이션") : fail("맞았을 때 애니메이션이 " + hz.anim1);
+    hz.s2.lives === hz.s1.lives ? pass("맞은 직후에는 잠깐 무적이라 또 줄지 않음") : fail("맞은 직후 또 목숨이 줄어듦");
+    await sleep(150);
+    await shot("9-맞음");
+    const over = await js(`(() => {
+      muted = true;
+      lives = 1; invincible = 0; hitTimer = 0;
+      const b = __G.hazards()[0]; player.x = b.x - player.w / 2; player.y = b.y - player.h / 2; player.vy = 0;
+      for (let i = 0; i < 60; i++) update(1 / 60);
+      muted = false;
+      return { ...__G.state(), msg: document.getElementById("msg").innerText };
+    })()`);
+    over.gameOver && over.lives === 0 ? pass("목숨이 다 떨어지면 게임 끝 화면이 나옴") : fail("목숨이 0이 돼도 게임이 끝나지 않음");
+    console.log("     (게임 끝 글자: " + over.msg.replace(/\n+/g, " / ") + ")");
+    await sleep(100);
+    await shot("10-게임끝");
+    await sleep(900);
+    await key("keyDown", "Enter"); await key("keyUp", "Enter");
+    await sleep(200);
+    const again = await js(`({ ...__G.state(), items: __G.items().length })`);
+    !again.gameOver && again.score === 0 && again.lives > 0
+      ? pass(`키를 누르면 처음부터 다시 시작 (목숨 ${again.lives}, 점수 0, ${NAME} ${again.items}개)`)
+      : fail("게임 끝에서 키를 눌러도 다시 시작하지 않음");
+  }
 
   // 9. 창 크기
   console.log("[창 크기]");
