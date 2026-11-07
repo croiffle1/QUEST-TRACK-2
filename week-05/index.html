@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>여우와 달밤 묘지</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0a18; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: "Malgun Gothic", sans-serif; color: #fff; }
+  #wrap { position: relative; }
+  canvas { display: block; image-rendering: pixelated; }
+  #hud { position: absolute; left: 12px; top: 8px; right: 12px; display: flex; gap: 18px; font-size: 20px; font-weight: bold; text-shadow: 2px 2px 0 #000; }
+  #hud .hearts { color: #ff5470; letter-spacing: 2px; }
+  #hud .best { margin-left: auto; color: #c9b8ff; }
+  #msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+         background: rgba(0, 0, 0, .55); font-size: 18px; line-height: 1.8; text-align: center; text-shadow: 2px 2px 0 #000; }
+  #msg.hide { display: none; }
+  #msg b { font-size: 30px; color: #ffd54a; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div id="hud"></div>
+  <div id="msg">그림과 소리를 불러오는 중...</div>
+</div>
+<script>
+// ── 화면 크기: 게임 안에서는 480×272, 창에 맞춰 정수 배로 키움 ──
+const W = 480, H = 272, TILE = 16;
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const hud = document.getElementById("hud");
+const msg = document.getElementById("msg");
+let scale = 1;
+function resize() {
+  scale = Math.max(1, Math.floor(Math.min(innerWidth / W, innerHeight / H)));
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+  ctx.imageSmoothingEnabled = false; // 픽셀 아트가 흐려지지 않게 (최근접 필터)
+}
+addEventListener("resize", resize);
+resize();
+
+// ── 에셋 불러오기 (프레임 정보는 drop.json 에서 옮겨 적음) ──
+const IMG = "assets/images/", SND = "assets/sounds/";
+const FOX = {
+  "idle": { file: "fox-player_idle.png", frames: 4, fps: 10, loop: true },
+  "run":  { file: "fox-player_run.png",  frames: 6, fps: 14, loop: true },
+  "jump": { file: "fox-player_jump.png", frames: 2, fps: 10, loop: true },
+  "hit":  { file: "fox-player_hit.png",  frames: 2, fps: 12, loop: false },
+};
+const FOX_W = 33, FOX_H = 32;
+const COIN = { file: "dungeon-coin_spin.png", fw: 6, fh: 7, frames: 4, fps: 12 };
+const LAYERS = [ // 뒤 레이어일수록 천천히 (speed 는 drop.json 값)
+  { name: "sky",       file: "moonlit-graveyard_background.png", w: 384, h: 224, speed: 0.1, y: 0 },
+  { name: "mountains", file: "moonlit-graveyard_mountains.png",  w: 192, h: 179, speed: 0.3, y: H - 179 },
+  { name: "graves",    file: "moonlit-graveyard_graveyard.png",  w: 384, h: 123, speed: 0.6, y: H - 123 },
+];
+const images = {};
+
+function loadImage(name, file) {
+  return new Promise((ok, fail) => {
+    const im = new Image();
+    im.onload = () => { images[name] = im; ok(); };
+    im.onerror = () => fail(IMG + file);
+    im.src = IMG + file;
+  });
+}
+
+const sounds = {
+  jump: new Audio(SND + "jump.wav"),
+  coin: new Audio(SND + "coin.wav"),
+  bgm:  new Audio(SND + "haunted-house-theme.mp3"),
+};
+sounds.bgm.loop = true; // 배경음악은 끝나면 처음부터 다시
+sounds.bgm.volume = 0.4;
+let muted = false;
+function playSfx(name) {
+  if (muted) return;
+  const s = sounds[name].cloneNode(); // 겹쳐서 여러 번 나도록 복사해서 재생
+  s.volume = 0.6;
+  s.play().catch(() => {});
+}
+
+// ── 맵: 가로 60칸, 화면(30칸)보다 넓어서 여우를 따라 화면이 움직임. # 은 땅 ──
+const MAP = [
+  "............................................................",
+  "............................................................",
+  "............................................................",
+  "............................................................",
+  "............................................................",
+  "............................................................",
+  "...............####.............#####.........####..........",
+  "............................................................",
+  "............................................................",
+  "..........####............#####..........####...............",
+  "............................................................",
+  "............................................................",
+  ".....####...........####...........####...........####......",
+  "............................................................",
+  "............................................................",
+  "############################################################",
+  "############################################################",
+];
+const ROWS = MAP.length, COLS = MAP[0].length, WORLD_W = COLS * TILE;
+function isSolid(c, r) {
+  if (c < 0 || c >= COLS || r >= ROWS) return true; // 맵 양끝과 아래는 벽
+  if (r < 0) return false;
+  return MAP[r][c] === "#";
+}
+// 던전 타일셋: 맨 위 칸은 돌 발판(3번째 줄), 그 아래는 벽돌
+function tileFor(c, r) {
+  if (isSolid(c, r - 1)) return [4 * TILE, 3 * TILE];
+  const l = isSolid(c - 1, r), rr = isSolid(c + 1, r);
+  const col = !l && !rr ? 3 : !l ? 0 : !rr ? 2 : 1;
+  return [col * TILE, 3 * TILE];
+}
+
+// ── 금화 ──
+// 금화가 놓일 수 있는 자리: 빈 칸 중에서 1~3칸 아래에 밟을 땅이 있는 곳 (시작 자리 근처는 뺌)
+const COIN_COUNT = 5;
+const COIN_SPOTS = [];
+for (let r = 0; r < ROWS; r++)
+  for (let c = 0; c < COLS; c++) {
+    if (isSolid(c, r) || c <= 4) continue;
+    let gap = 0;
+    while (gap < 3 && !isSolid(c, r + gap + 1)) gap++;
+    if (gap < 3) COIN_SPOTS.push([c, r]);
+  }
+let coins = [];
+// 화면에 늘 5개. 하나를 먹으면 다른 자리에 새로 하나 나옴 (다른 금화나 여우 바로 옆은 피함)
+function spawnCoin() {
+  for (let tries = 0; tries < 200; tries++) {
+    const [c, r] = COIN_SPOTS[Math.floor(Math.random() * COIN_SPOTS.length)];
+    const x = c * TILE + 8, y = r * TILE + 8;
+    if (coins.some((k) => Math.abs(k.x - x) < 48 && Math.abs(k.y - y) < 48)) continue;
+    if (Math.abs(x - (player.x + player.w / 2)) < 64 && Math.abs(y - (player.y + player.h / 2)) < 64) continue;
+    coins.push({ x, y });
+    return;
+  }
+}
+function spawnAllCoins() {
+  coins = [];
+  for (let i = 0; i < COIN_COUNT; i++) spawnCoin();
+}
+
+// ── 가시 철퇴 ──
+// roll: 땅 위를 굴러다님 / float: 제자리에서 위아래로 오르내림
+const BALL_R = 11; // 부딪히는 반지름 (그림은 28×28)
+let balls = [];
+const BALL_START = [
+  { type: "roll",  x: 300, min: 200, max: 500, speed: 60 },
+  { type: "roll",  x: 700, min: 600, max: 940, speed: -75 },
+  { type: "float", x: 400, baseY: 165, amp: 45, speed: 1.6 },
+  { type: "float", x: 896, baseY: 165, amp: 45, speed: 2.1 },
+];
+const BALL_EXTRA = [ // 금화 10개마다 하나씩 늘어남
+  { type: "roll",  x: 150, min: 90,  max: 420, speed: 90 },
+  { type: "float", x: 944, baseY: 165, amp: 45, speed: 2.6 },
+  { type: "roll",  x: 820, min: 520, max: 940, speed: -100 },
+];
+function makeBall(b) {
+  return { ...b, y: b.type === "roll" ? 240 - 14 : b.baseY, angle: 0, t: Math.random() * 6 };
+}
+let hazardsOn = true; // 확인 도구가 길 찾기를 할 때만 끔
+
+// ── 여우 ──
+// x, y 는 몸통 상자의 왼쪽 위. 33×32 그림 안에서 몸통은 (8, 12) 부터 16×20
+const player = { x: 40, y: 200, w: 16, h: 20, vx: 0, vy: 0, onGround: false,
+                 facing: 1, anim: "idle", animTime: 0 };
+const SPEED = 110, GRAVITY = 900, JUMP = 330, MAX_FALL = 400;
+
+function overlapsSolid(x, y, w, h) {
+  for (let r = Math.floor(y / TILE); r <= Math.floor((y + h - 0.001) / TILE); r++)
+    for (let c = Math.floor(x / TILE); c <= Math.floor((x + w - 0.001) / TILE); c++)
+      if (isSolid(c, r)) return true;
+  return false;
+}
+function moveX(dx) {
+  player.x += dx;
+  if (!overlapsSolid(player.x, player.y, player.w, player.h)) return;
+  if (dx > 0) player.x = Math.floor((player.x + player.w) / TILE) * TILE - player.w;
+  else player.x = (Math.floor(player.x / TILE) + 1) * TILE;
+}
+function moveY(dy) {
+  player.y += dy;
+  player.onGround = false;
+  if (!overlapsSolid(player.x, player.y, player.w, player.h)) return;
+  if (dy > 0) { player.y = Math.floor((player.y + player.h) / TILE) * TILE - player.h; player.onGround = true; }
+  else player.y = (Math.floor(player.y / TILE) + 1) * TILE;
+  player.vy = 0;
+}
+
+// ── 목숨과 점수 ──
+const LIVES = 3;
+let lives = LIVES, score = 0, best = 0, hitTimer = 0, invincible = 0, gameOver = false, gameOverAt = 0;
+try { best = Number(localStorage.getItem("fox-best")) || 0; } catch {}
+
+function resetGame() {
+  Object.assign(player, { x: 40, y: 200, vx: 0, vy: 0, onGround: false, facing: 1, anim: "idle", animTime: 0 });
+  lives = LIVES; score = 0; hitTimer = 0; invincible = 0; gameOver = false;
+  balls = BALL_START.map(makeBall);
+  spawnAllCoins();
+}
+
+// ── 키 ──
+const keys = {};
+let jumpPressed = false, started = false;
+addEventListener("keydown", (e) => {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(e.code)) e.preventDefault();
+  if (!loaded) return;
+  if (gameOver && performance.now() - gameOverAt < 800) return; // 죽는 순간 누르던 키로 바로 다시 시작하지 않게
+  if (!started || (gameOver && !e.repeat)) { // 브라우저는 키를 한 번 눌러야 소리를 내 줌
+    if (gameOver) resetGame();
+    started = true;
+    msg.classList.add("hide");
+    if (!muted) sounds.bgm.play().catch(() => {});
+    return;
+  }
+  keys[e.code] = true;
+  if (e.code === "Space" && !e.repeat) jumpPressed = true;
+  if (e.code === "KeyM") {
+    muted = !muted;
+    sounds.bgm.muted = muted;
+    if (!muted) sounds.bgm.play().catch(() => {});
+  }
+});
+addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+function hurt(ball) {
+  lives--;
+  hitTimer = 0.4;
+  invincible = 1.5;
+  const away = player.x + player.w / 2 < ball.x ? -1 : 1; // 철퇴 반대쪽으로 튕겨 나감
+  player.vx = away * 140;
+  player.vy = -220;
+}
+
+function update(dt) {
+  if (gameOver) return;
+
+  // 맞은 직후 잠깐은 조작이 안 되고 튕겨 나감
+  let dir = 0;
+  if (hitTimer > 0) {
+    hitTimer -= dt;
+    if (hitTimer <= 0 && lives <= 0) { endGame(); return; }
+  } else {
+    dir = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
+    player.vx = dir * SPEED;
+    if (dir) player.facing = dir;
+    if (jumpPressed && player.onGround) { player.vy = -JUMP; playSfx("jump"); }
+  }
+  jumpPressed = false;
+  if (invincible > 0) invincible -= dt;
+
+  player.vy = Math.min(player.vy + GRAVITY * dt, MAX_FALL);
+  moveX(player.vx * dt);
+  moveY(player.vy * dt);
+
+  // 가시 철퇴 움직이기
+  for (const b of balls) {
+    b.t += dt;
+    if (b.type === "roll") {
+      b.x += b.speed * dt;
+      if (b.x < b.min || b.x > b.max) { b.x = Math.max(b.min, Math.min(b.max, b.x)); b.speed = -b.speed; }
+      b.angle += (b.speed * dt) / 14; // 굴러간 거리만큼 돌림
+    } else {
+      b.y = b.baseY + Math.sin(b.t * b.speed) * b.amp;
+    }
+  }
+
+  // 부딪혔는지 (몸통 상자에서 철퇴 중심까지 가장 가까운 거리)
+  if (hazardsOn && invincible <= 0) {
+    for (const b of balls) {
+      const nx = Math.max(player.x, Math.min(b.x, player.x + player.w));
+      const ny = Math.max(player.y, Math.min(b.y, player.y + player.h));
+      if ((nx - b.x) ** 2 + (ny - b.y) ** 2 < BALL_R * BALL_R) { hurt(b); break; }
+    }
+  }
+
+  // 어떤 애니메이션을 보여 줄지 — 철퇴에 맞은 그 순간부터 피격 그림이 나오게 부딪힘 확인 뒤에 고름
+  // (점프 시트 2장: 올라갈 때 0번, 내려올 때 1번)
+  let anim;
+  if (hitTimer > 0) anim = "hit";
+  else if (player.onGround) anim = dir ? "run" : "idle";
+  else anim = player.vy < 0 ? "jump" : "fall";
+  if (anim !== player.anim) { player.anim = anim; player.animTime = 0; }
+  player.animTime += dt;
+
+  // 금화 먹기
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+  let eaten = 0;
+  coins = coins.filter((k) => {
+    const hit = Math.abs(k.x - cx) < player.w / 2 + 5 && Math.abs(k.y - cy) < player.h / 2 + 5;
+    if (hit) eaten++;
+    return !hit;
+  });
+  for (let i = 0; i < eaten; i++) {
+    score++;
+    playSfx("coin");
+    spawnCoin();
+    const extra = Math.floor(score / 10) - 1; // 10개, 20개, 30개째에 철퇴가 하나씩 늘어남
+    if (score % 10 === 0 && BALL_EXTRA[extra]) balls.push(makeBall(BALL_EXTRA[extra]));
+  }
+}
+
+function endGame() {
+  gameOver = true;
+  gameOverAt = performance.now();
+  const newBest = score > best;
+  if (newBest) { best = score; try { localStorage.setItem("fox-best", String(best)); } catch {} }
+  msg.innerHTML = `<b>게임 끝!</b>금화 ${score}개` + (newBest ? " · 최고 기록!" : ` · 최고 ${best}개`) +
+                  "<br><br>아무 키나 눌러서 다시 시작";
+  msg.classList.remove("hide");
+}
+
+function frameOf(anim, time) {
+  const f = Math.floor(time * anim.fps);
+  return anim.loop === false ? Math.min(f, anim.frames - 1) : f % anim.frames;
+}
+
+function draw(time) {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+
+  // 화면이 여우를 따라감
+  const camX = Math.round(Math.max(0, Math.min(WORLD_W - W, player.x + player.w / 2 - W / 2)));
+
+  // 배경 3장: 뒤 레이어일수록 천천히 (패럴랙스)
+  ctx.fillStyle = "rgb(44, 1, 39)";
+  ctx.fillRect(0, 0, W, H);
+  for (const L of LAYERS) {
+    const off = Math.round(camX * L.speed) % L.w;
+    for (let x = -off; x < W; x += L.w) ctx.drawImage(images[L.name], x, L.y);
+  }
+
+  ctx.save();
+  ctx.translate(-camX, 0);
+
+  // 땅과 발판
+  const c0 = Math.floor(camX / TILE), c1 = c0 + Math.ceil(W / TILE);
+  for (let r = 0; r < ROWS; r++)
+    for (let c = c0; c <= c1 && c < COLS; c++)
+      if (MAP[r][c] === "#") {
+        const [sx, sy] = tileFor(c, r);
+        ctx.drawImage(images.tiles, sx, sy, TILE, TILE, c * TILE, r * TILE, TILE, TILE);
+      }
+
+  // 금화 (6×7 이 너무 작아서 2배로)
+  const cf = frameOf(COIN, time);
+  for (const k of coins)
+    ctx.drawImage(images.coin, cf * COIN.fw, 0, COIN.fw, COIN.fh, k.x - COIN.fw, k.y - COIN.fh, COIN.fw * 2, COIN.fh * 2);
+
+  // 가시 철퇴
+  for (const b of balls) {
+    ctx.save();
+    ctx.translate(Math.round(b.x), Math.round(b.y));
+    if (b.type === "roll") ctx.rotate(b.angle);
+    ctx.drawImage(images.ball, -14, -14);
+    ctx.restore();
+  }
+
+  // 여우 (맞은 뒤 무적일 때는 깜빡임)
+  if (!(invincible > 0 && hitTimer <= 0 && Math.floor(time * 12) % 2)) {
+    const sheet = player.anim === "fall" ? "jump" : player.anim;
+    const frame = player.anim === "jump" ? 0 : player.anim === "fall" ? 1 : frameOf(FOX[sheet], player.animTime);
+    const x = Math.round(player.x - 8), y = Math.round(player.y - 12);
+    ctx.save();
+    if (player.facing < 0) { ctx.translate(x + FOX_W, y); ctx.scale(-1, 1); }
+    else ctx.translate(x, y);
+    ctx.drawImage(images[sheet], frame * FOX_W, 0, FOX_W, FOX_H, 0, 0, FOX_W, FOX_H);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  hud.innerHTML = `<span class="hearts">${"♥".repeat(Math.max(0, lives))}${"♡".repeat(LIVES - Math.max(0, lives))}</span>` +
+                  `<span>금화 ${score}</span><span class="best">최고 ${best}</span>`;
+}
+
+// 확인 도구(week-04/check)가 게임을 들여다보는 창구
+window.CHECK = {
+  name: "금화",
+  items: () => coins,
+  setItems: (v) => { coins = v; },
+  respawn: () => spawnAllCoins(),
+  spots: COIN_SPOTS,
+  count: COIN_COUNT,
+  doubleJump: false,
+  setHazards: (on) => { hazardsOn = on; },
+  hazards: () => balls,
+  state: () => ({ lives, gameOver, invincible, hitTimer, score }),
+};
+
+// ── 시작 ──
+let loaded = false, last = 0;
+function loop(now) {
+  const t = now / 1000;
+  const dt = Math.min(t - last, 1 / 30); // 창을 잠깐 내려도 튀지 않게
+  last = t;
+  if (started) update(dt);
+  draw(t);
+  requestAnimationFrame(loop);
+}
+
+Promise.all([
+  ...Object.entries(FOX).map(([name, a]) => loadImage(name, a.file)),
+  ...LAYERS.map((L) => loadImage(L.name, L.file)),
+  loadImage("coin", COIN.file),
+  loadImage("ball", "spiked-ball.png"),
+  loadImage("tiles", "dungeon-tileset.png"),
+]).then(() => {
+  loaded = true;
+  resetGame();
+  msg.innerHTML = "<b>여우와 달밤 묘지</b>← → 움직이기 · 스페이스 점프<br>가시 철퇴를 피해서 금화를 모아요 (목숨 3개)<br>M 소리 끄기/켜기<br><br>아무 키나 눌러서 시작";
+  requestAnimationFrame((now) => { last = now / 1000; loop(now); });
+}).catch((path) => {
+  msg.textContent = "그림을 못 불러왔어요: " + path;
+});
+</script>
+</body>
+</html>
