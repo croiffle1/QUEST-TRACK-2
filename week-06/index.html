@@ -66,6 +66,14 @@
     }
     .stale b { display: block; font-size: 15px; color: #92400e; }
 
+    .days { display: flex; justify-content: center; gap: 8px; margin: 0 0 20px; }
+    .days button {
+      margin: 0; padding: 8px 20px; font-size: 15px;
+      background: #e2e8f0; color: #334155;
+    }
+    .days button[aria-pressed="true"] { background: #1d4ed8; color: #fff; }
+    .days button:disabled { background: #f1f5f9; color: #94a3b8; }
+
     .loading { font-size: 18px; color: #334155; padding: 24px 0; }
     .error { background: #fef2f2; border: 1px solid #fecaca; border-radius: 16px; padding: 20px; }
     .error h2 { margin: 0; font-size: 20px; color: #b91c1c; }
@@ -88,6 +96,10 @@
 
     <div id="weather" class="box" hidden>
       <p id="stale" class="stale" role="alert" hidden><b>지금 정보가 아니에요</b><span id="stale-why"></span></p>
+      <div class="days" role="group" aria-label="날짜 고르기">
+        <button type="button" id="day-today" aria-pressed="true">오늘</button>
+        <button type="button" id="day-tomorrow" aria-pressed="false">내일</button>
+      </div>
       <p class="now-temp" id="now-temp"></p>
       <p class="now-word" id="now-word"></p>
       <p class="minmax">
@@ -167,23 +179,60 @@
       });
     }
 
+    // [오늘] [내일] 중 무엇을 보고 있는지, 지금 화면에 띄운 날씨와 까닭
+    let day = "today";
+    let shown = null, shownWhy = null;
+
     // 날씨 보여 주기. why 가 있으면 예전에 받은 정보라는 것과 그 까닭을 같이 보여 줘요
     function render(w, why) {
-      $("now-temp").textContent = temp(w.nowTemp);
-      $("now-word").textContent = weatherWord(w.code);
-      $("high").textContent = temp(w.high);
-      $("low").textContent = temp(w.low);
-      if (why) {
-        const when = whenText(w.savedAt);
-        $("stale-why").textContent = why + " 아래는 " + when + "에 받은 정보예요.";
-        $("day-label").textContent = "그날";
-        $("time").textContent = when + "에 받음 · wttr.in";
+      shown = w; shownWhy = why;
+      const hasTomorrow = !!w.tomorrow;
+      if (!hasTomorrow) day = "today"; // 내일 정보가 없으면 내일 단추는 못 누름
+      $("day-tomorrow").disabled = !hasTomorrow;
+      $("day-tomorrow").title = hasTomorrow ? "" : "내일 날씨 정보가 없어요";
+      $("day-today").setAttribute("aria-pressed", String(day === "today"));
+      $("day-tomorrow").setAttribute("aria-pressed", String(day === "tomorrow"));
+
+      const when = why ? whenText(w.savedAt) : "";
+      if (day === "today") {
+        $("now-temp").textContent = temp(w.nowTemp);
+        $("now-word").textContent = weatherWord(w.code);
+        $("high").textContent = temp(w.high);
+        $("low").textContent = temp(w.low);
+        $("day-label").textContent = why ? "그날" : "오늘";
+        $("time").textContent = why ? when + "에 받음 · wttr.in" : koreaTime(w.obs) + " 관측 · wttr.in";
       } else {
-        $("day-label").textContent = "오늘";
-        $("time").textContent = koreaTime(w.obs) + " 관측 · wttr.in";
+        // 내일은 "지금" 기온이 없어서 낮 12시 예보를 크게 보여 줘요
+        const t = w.tomorrow;
+        $("now-temp").textContent = temp(t.noonTemp);
+        $("now-word").textContent = weatherWord(t.noonCode);
+        $("high").textContent = temp(t.high);
+        $("low").textContent = temp(t.low);
+        $("day-label").textContent = why ? "그다음 날" : "내일";
+        $("time").textContent = (why ? when + "에 받은 " : "") + "내일 낮 12시 예보 · wttr.in";
       }
+      if (why) $("stale-why").textContent = why + " 아래는 " + when + "에 받은 정보예요.";
       $("stale").hidden = !why;
       show("weather");
+    }
+
+    function pickDay(d) {
+      day = d;
+      if (shown) render(shown, shownWhy);
+    }
+    $("day-today").addEventListener("click", () => pickDay("today"));
+    $("day-tomorrow").addEventListener("click", () => pickDay("tomorrow"));
+
+    // 내일 날씨 꺼내기 (wttr.in 의 weather[1]). 빠진 게 있으면 null
+    function readTomorrow(data) {
+      const d = data && data.weather && data.weather[1];
+      const noon = d && Array.isArray(d.hourly) && d.hourly.find((h) => String(h.time) === "1200");
+      if (!d || !noon) return null;
+      const raw = [noon.tempC, noon.weatherCode, d.maxtempC, d.mintempC];
+      if (raw.some((v) => v === undefined || v === "")) return null;
+      const [noonTemp, noonCode, high, low] = raw.map(Number);
+      if ([noonTemp, noonCode, high, low].some(Number.isNaN)) return null;
+      return { noonTemp, noonCode, high, low };
     }
 
     // 못 받아 왔을 때: 예전에 받은 게 있으면 그걸 까닭과 함께, 없으면 까닭만
@@ -253,7 +302,7 @@
         return;
       }
 
-      const w = { nowTemp, code, high, low, obs: now.observation_time, savedAt: Date.now() };
+      const w = { nowTemp, code, high, low, obs: now.observation_time, savedAt: Date.now(), tomorrow: readTomorrow(data) };
       saveLast(w);
       render(w, null);
     }

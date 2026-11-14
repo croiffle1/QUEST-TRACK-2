@@ -2,7 +2,7 @@
 // 날씨 정보는 여기서 저장하지 않고, 앱(index.html)이 마지막으로 받은 것을 따로 기억한다.
 // 앱 파일을 바꾸면 아래 VERSION 숫자를 하나 올려야 폰에 새 파일이 들어간다.
 
-const VERSION = "weather-v1";
+const VERSION = "weather-v2";
 const FILES = [
   "./",
   "./index.html",

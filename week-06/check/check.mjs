@@ -129,12 +129,21 @@ async function onRequest(p) {
 }
 
 // wttr.in 과 같은 모양의 가짜 날씨 (숫자도 글자로 옴, 관측 시각은 영국 시간)
-function fakeWeather(t, code, hi, lo) {
+// tm: 내일 [낮 12시 기온, 낮 12시 날씨 번호, 가장 높은, 가장 낮은]. 없으면 내일 정보가 빠진 것
+function fakeWeather(t, code, hi, lo, tm = [t + 2, 116, hi + 3, lo + 1]) {
+  const days = [{ date: "2026-11-14", maxtempC: String(hi), mintempC: String(lo) }];
+  if (tm) days.push({
+    date: "2026-11-15", maxtempC: String(tm[2]), mintempC: String(tm[3]),
+    hourly: [0, 300, 600, 900, 1200, 1500, 1800, 2100].map((h) => ({
+      time: String(h), tempC: String(h === 1200 ? tm[0] : tm[0] - 3), weatherCode: String(h === 1200 ? tm[1] : 113),
+    })),
+  });
   return {
     current_condition: [{ temp_C: String(t), weatherCode: String(code), observation_time: "06:46 AM" }],
-    weather: [{ date: "2026-11-14", maxtempC: String(hi), mintempC: String(lo) }],
+    weather: days,
   };
 }
+const click = (id) => js(`document.getElementById("${id}").click()`);
 
 async function connect() {
   for (let i = 0; i < 50; i++) {
@@ -182,6 +191,8 @@ const STATE = `(() => {
     staleText: document.getElementById("stale")?.innerText.trim(),
     time: document.getElementById("time")?.innerText.trim(),
     dayLabel: document.getElementById("day-label")?.innerText.trim(),
+    pressed: [...document.querySelectorAll(".days button[aria-pressed=true]")].map((b) => b.innerText.trim()).join(","),
+    tomorrowOff: !!document.getElementById("day-tomorrow")?.disabled,
   };
 })()`;
 async function waitState(want, ms = 12000) {
@@ -233,6 +244,43 @@ try {
   } else {
     fail(`날씨를 받아 오지 못함 (화면: ${real.state}${real.why ? ", 까닭: " + real.why : ""})`);
   }
+
+  if (real.state === "weather") {
+    await click("day-tomorrow");
+    const rt = await js(STATE);
+    await shot("1-진짜날씨-내일");
+    rt.dayLabel === "내일" && isTemp(rt.temp) && !rt.word.includes("알 수 없는") && isTemp(rt.high) && isTemp(rt.low)
+      ? pass(`[내일] 진짜 내일 날씨: 낮 12시 ${rt.temp} ${rt.word}, 가장 높은 ${rt.high}, 가장 낮은 ${rt.low}`)
+      : fail("진짜 내일 날씨: " + JSON.stringify(rt));
+  }
+
+  // 1-1. [오늘] [내일] 단추
+  console.log("[오늘 · 내일 단추]");
+  mockData = fakeWeather(6, 113, 11, 2, [15, 302, 17, 8]);
+  await openWith("mock");
+  let d = await waitState("weather", 5000);
+  d.pressed === "오늘" && d.temp === "6°" && d.word === "맑음" && d.dayLabel === "오늘"
+    ? pass("처음에는 [오늘] 이 눌려 있고 오늘 날씨(6° 맑음)가 보임") : fail("처음 화면: " + JSON.stringify(d));
+  await click("day-tomorrow");
+  d = await js(STATE);
+  await shot("1-내일단추");
+  d.pressed === "내일" && d.temp === "15°" && d.word === "비" && d.high === "17°" && d.low === "8°" && d.dayLabel === "내일"
+    ? pass("[내일] 을 누르면 내일 낮 12시 15° 비, 가장 높은 17°, 가장 낮은 8° 가 보임") : fail("내일 화면: " + JSON.stringify(d));
+  d.time.includes("내일 낮 12시 예보") ? pass(`아래 글이 "${d.time}" 로 바뀜`) : fail("내일 아래 글: " + d.time);
+  await click("day-today");
+  d = await js(STATE);
+  d.pressed === "오늘" && d.temp === "6°" && d.high === "11°" && d.dayLabel === "오늘" && d.time.includes("관측")
+    ? pass("[오늘] 을 다시 누르면 오늘 날씨로 돌아옴") : fail("오늘로 돌아오기: " + JSON.stringify(d));
+  await click("day-tomorrow");
+  mockData = fakeWeather(7, 113, 12, 3, [16, 113, 18, 9]);
+  await click("reload");
+  d = await waitState("weather", 5000);
+  d.pressed === "내일" && d.temp === "16°" ? pass("[내일] 을 보다가 다시 불러오면 새 내일 날씨(16°)를 보여 줌") : fail("다시 불러온 뒤: " + JSON.stringify(d));
+  mockData = fakeWeather(6, 113, 11, 2, null);
+  await openWith("mock");
+  d = await waitState("weather", 5000);
+  d.tomorrowOff && d.temp === "6°" && d.pressed === "오늘"
+    ? pass("내일 정보가 빠져 오면 [내일] 단추만 잠기고 오늘 날씨는 그대로 보임") : fail("내일 정보 없음: " + JSON.stringify(d));
 
   // 2. 불러오는 중
   console.log("[불러오는 동안]");
@@ -340,6 +388,12 @@ try {
     ? pass(`까닭과 받은 때가 같이 보임 — "${st.staleText.replace(/\n/g, " ")}"`) : fail("안내 글: " + st.staleText);
   st.time?.includes(whenNow + "에 받음") && st.dayLabel === "그날"
     ? pass(`아래 시각도 받은 때로 바뀜 ("${st.time}"), "오늘" 대신 "그날"`) : fail(`시각: ${st.time}, 앞말: ${st.dayLabel}`);
+  await click("day-tomorrow");
+  st = await js(STATE);
+  await shot("7-인터넷끊김-예전정보-내일");
+  st.stale && st.temp === "7°" && st.dayLabel === "그다음 날" && st.time.includes(whenNow + "에 받은 내일 낮 12시 예보")
+    ? pass(`끊긴 동안 [내일] 을 눌러도 받아 둔 내일 날씨(7°)와 받은 때를 보여 줌 ("${st.time}")`) : fail("끊긴 동안 내일: " + JSON.stringify(st));
+  await click("day-today");
   // (2) 인터넷이 다시 켜지면 저절로 새로 받기
   mockData = fakeWeather(7, 113, 9, 2);
   mode = "mock";
