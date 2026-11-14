@@ -11,10 +11,14 @@
 //  4. "다시 불러오기" 단추가 되는지
 //  5. 날씨 번호가 모두 한국어 낱말로 바뀌는지
 //  6. 폰 · 태블릿 · 컴퓨터 화면 폭에서 잘리거나 옆으로 밀리지 않는지
-//  7. 브라우저 오류 메시지가 없는지
+//  7. 못 받아 왔을 때 마지막으로 받은 날씨를 "언제 받은 것인지"와 같이 보여 주는지
+//  8. 폰에 설치되는 앱(PWA)인지: GitHub Pages 와 같은 주소(/QUEST-TRACK-2/week-06/)로 작은 서버를 켜서
+//     manifest · 아이콘 · 서비스 워커 · 설치 가능 여부 · 인터넷이 끊겨도 앱이 열리는지
+//  9. 브라우저 오류 메시지가 없는지
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,6 +30,36 @@ const SHOTS = join(HERE, "shots");
 const TMP = join(HERE, ".browser-tmp");
 const PORT = 9334;
 const API_HOST = "wttr.in";
+const WEB_PORT = 8606;
+const PAGES_PATH = "/QUEST-TRACK-2/week-06/"; // GitHub Pages 주소와 같은 길
+const HTTP_APP = `http://127.0.0.1:${WEB_PORT}${PAGES_PATH}`;
+
+// ── 작은 서버: week-06 폴더를 GitHub Pages 처럼 /QUEST-TRACK-2/week-06/ 에서 보여 준다 ──
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+  ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml" };
+let server = null;
+function startServer() {
+  return new Promise((ok) => {
+    server = createServer((req, res) => {
+      const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
+      if (!path.startsWith(PAGES_PATH)) { res.writeHead(404); return res.end(); }
+      let file = resolve(WEEK, "." + path.slice(PAGES_PATH.length - 1));
+      if (!file.startsWith(WEEK)) { res.writeHead(403); return res.end(); }
+      if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
+      if (!existsSync(file)) { res.writeHead(404); return res.end(); }
+      const ext = file.slice(file.lastIndexOf("."));
+      res.writeHead(200, { "Content-Type": TYPES[ext] || "application/octet-stream", "Cache-Control": "no-cache" });
+      res.end(readFileSync(file));
+    }).listen(WEB_PORT, "127.0.0.1", ok);
+  });
+}
+function stopServer() {
+  return new Promise((ok) => {
+    if (!server) return ok();
+    const s = server; server = null;
+    s.closeAllConnections(); s.close(() => ok());
+  });
+}
 
 const BROWSERS = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -144,6 +178,10 @@ const STATE = `(() => {
     low: document.getElementById("low")?.innerText.trim(),
     why: document.getElementById("error-why")?.innerText.trim(),
     button: !document.getElementById("reload")?.disabled,
+    stale: vis("stale"),
+    staleText: document.getElementById("stale")?.innerText.trim(),
+    time: document.getElementById("time")?.innerText.trim(),
+    dayLabel: document.getElementById("day-label")?.innerText.trim(),
   };
 })()`;
 async function waitState(want, ms = 12000) {
@@ -156,10 +194,19 @@ async function waitState(want, ms = 12000) {
   }
   return s;
 }
-async function openWith(m) {
+// keep: 마지막으로 받은 날씨 기억을 남겨 둘지 (기본은 지우고 처음 연 것처럼)
+async function openWith(m, { keep = false, url = pathToFileURL(APP).href } = {}) {
   mode = m;
-  await send("Page.navigate", { url: pathToFileURL(APP).href });
+  let id = null;
+  if (!keep) id = (await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `try { localStorage.removeItem("pt-weather-last") } catch (e) {}`,
+  })).identifier;
+  await send("Page.navigate", { url });
   await sleep(300);
+  if (id) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: id });
+}
+async function setOffline(off) {
+  await send("Network.emulateNetworkConditions", { offline: off, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
 }
 const isTemp = (s) => /^-?\d+°$/.test(s || "");
 
@@ -169,6 +216,7 @@ try {
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Log.enable");
+  await send("Network.enable");
   await send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   console.log("\n앱: " + APP + "\n");
@@ -256,9 +304,12 @@ try {
   mockData = fakeWeather(-18, 392, -10, -24);
   for (const [w, h, mobile, name] of SIZES) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile });
-    for (const [m, label] of [["mock", "날씨"], ["offline", "못받음"]]) {
-      await openWith(m);
-      await waitState(m === "mock" ? "weather" : "error", 5000);
+    for (const [m, label] of [["mock", "날씨"], ["offline", "못받음"], ["stale", "예전정보"]]) {
+      if (m === "stale") { // 한 번 받아 둔 뒤 못 받게 하기
+        await openWith("mock"); await waitState("weather", 5000);
+        await openWith("offline", { keep: true });
+      } else await openWith(m);
+      await waitState(m === "offline" ? "error" : "weather", 5000);
       const f = await js(FIT);
       await shot(`6-${name}${w}-${label}`);
       f.scrollW <= f.W && f.out.length === 0
@@ -267,17 +318,100 @@ try {
     }
   }
 
-  // 7. 오류
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+
+  // 7. 마지막으로 받은 날씨
+  console.log("[못 받아 왔을 때 마지막으로 받은 날씨]");
+  mockData = fakeWeather(5, 116, 8, 1);
+  await openWith("mock");
+  await waitState("weather", 5000);
+  const saved = await js(`JSON.parse(localStorage.getItem("pt-weather-last") || "null")`);
+  saved && saved.nowTemp === 5 && Math.abs(Date.now() - saved.savedAt) < 60000
+    ? pass("받아 온 날씨와 받은 때를 기억해 둠") : fail("기억해 둔 것: " + JSON.stringify(saved));
+  const whenNow = await js(`whenText(${saved?.savedAt ?? 0})`);
+  // (1) 폰이 인터넷 끊김 상태
+  await setOffline(true);
+  await openWith("offline", { keep: true });
+  let st = await waitState("weather", 5000);
+  await shot("7-인터넷끊김-예전정보");
+  st.state === "weather" && st.stale && st.temp === "5°" && st.word === "구름 조금"
+    ? pass("인터넷이 끊기면 빈 화면 대신 마지막으로 받은 날씨(5° 구름 조금)를 보여 줌") : fail("인터넷 끊김: " + JSON.stringify(st));
+  st.staleText?.includes("인터넷이 끊겨") && st.staleText.includes(whenNow + "에 받은 정보")
+    ? pass(`까닭과 받은 때가 같이 보임 — "${st.staleText.replace(/\n/g, " ")}"`) : fail("안내 글: " + st.staleText);
+  st.time?.includes(whenNow + "에 받음") && st.dayLabel === "그날"
+    ? pass(`아래 시각도 받은 때로 바뀜 ("${st.time}"), "오늘" 대신 "그날"`) : fail(`시각: ${st.time}, 앞말: ${st.dayLabel}`);
+  // (2) 인터넷이 다시 켜지면 저절로 새로 받기
+  mockData = fakeWeather(7, 113, 9, 2);
+  mode = "mock";
+  await setOffline(false);
+  await sleep(1500);
+  st = await js(STATE);
+  st.temp === "7°" && !st.stale && st.dayLabel === "오늘"
+    ? pass("인터넷이 다시 켜지면 저절로 새 날씨(7°)를 받고 안내가 사라짐") : fail("다시 켜진 뒤: " + JSON.stringify(st));
+  // (3) 인터넷은 되는데 서버가 오류
+  await openWith("500", { keep: true });
+  st = await waitState("weather", 5000);
+  st.stale && st.staleText.includes("500") && st.temp === "7°"
+    ? pass("서버 오류 때도 까닭(500)과 마지막 날씨(7°)를 같이 보여 줌") : fail("서버 오류: " + JSON.stringify(st));
+
+  // 8. 폰에 설치되는 앱 (PWA)
+  console.log("[폰에 설치되는 앱 (GitHub Pages 와 같은 주소: " + PAGES_PATH + ")]");
+  await startServer();
+  mockData = fakeWeather(10, 113, 14, 4);
+  await openWith("mock", { url: HTTP_APP });
+  await waitState("weather", 5000);
+  const man = await send("Page.getAppManifest");
+  if (!man.url) fail("manifest 를 찾지 못함");
+  else {
+    man.errors?.length ? fail("manifest 오류: " + man.errors.map((e) => e.message).join(", ")) : pass("manifest 를 읽음 (" + man.url.replace(HTTP_APP, "") + ")");
+    const m = JSON.parse(man.data);
+    const startUrl = new URL(m.start_url, man.url).href;
+    startUrl === HTTP_APP ? pass("시작 주소가 week-06 주소와 같음 (" + PAGES_PATH + ")") : fail("시작 주소: " + startUrl);
+    m.display === "standalone" ? pass("설치하면 주소창 없이 앱처럼 열림 (standalone)") : fail("display: " + m.display);
+    for (const ic of m.icons) {
+      const u = new URL(ic.src, man.url).href;
+      const size = await js(`fetch(${JSON.stringify(u)}).then((r) => r.ok ? r.blob() : null).then((b) => b && createImageBitmap(b)).then((im) => im && im.width + "x" + im.height).catch(() => null)`);
+      size === ic.sizes ? pass(`아이콘 ${ic.src} (${ic.purpose}) 이 ${size} 크기로 열림`) : fail(`아이콘 ${ic.src}: 기대 ${ic.sizes}, 실제 ${size}`);
+    }
+  }
+  const sw = await js(`Promise.race([navigator.serviceWorker.ready.then((r) => r.scope), new Promise((ok) => setTimeout(() => ok(null), 8000))])`);
+  sw === HTTP_APP ? pass("서비스 워커가 켜짐 (범위: " + PAGES_PATH + ")") : fail("서비스 워커: " + sw);
+  await send("Page.reload");
+  await sleep(300);
+  await waitState("weather", 5000);
+  const ctl = await js(`!!navigator.serviceWorker.controller`);
+  ctl ? pass("다시 열면 서비스 워커가 앱을 맡음") : fail("서비스 워커가 앱을 맡지 않음");
+  const cached = await js(`caches.keys().then((k) => Promise.all(k.map((n) => caches.open(n).then((c) => c.keys())))).then((l) => l.flat().map((r) => new URL(r.url).pathname))`);
+  const need = ["", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"].map((f) => PAGES_PATH + f);
+  const miss = need.filter((p) => !cached.includes(p));
+  miss.length ? fail("저장 안 된 앱 파일: " + miss.join(", ")) : pass("앱 파일을 폰에 저장해 둠 (" + cached.length + "개)");
+  const inst = await send("Page.getInstallabilityErrors");
+  inst.installabilityErrors?.length
+    ? fail("설치할 수 없는 까닭: " + inst.installabilityErrors.map((e) => e.errorId).join(", "))
+    : pass("브라우저가 '설치할 수 있는 앱'으로 알아봄");
+  await shot("8-설치앱-주소로열기");
+  // 인터넷이 완전히 끊겼을 때: 서버도 끄고, 날씨 서버도 끊고, 앱을 다시 열기
+  await stopServer();
+  await setOffline(true);
+  await openWith("offline", { keep: true, url: HTTP_APP });
+  st = await waitState("weather", 6000);
+  await shot("8-설치앱-인터넷끊김");
+  st.state === "weather" && st.stale && st.temp === "10°"
+    ? pass("서버도 인터넷도 끊긴 채 다시 열어도 앱이 열리고 마지막 날씨(10°)와 받은 때를 보여 줌") : fail("끊긴 채 다시 열기: " + JSON.stringify(st));
+  await setOffline(false);
+
+  // 9. 오류
   console.log("[오류 메시지]");
   consoleErrors.length ? consoleErrors.forEach((e) => fail("브라우저 오류: " + e)) : pass("브라우저 오류 메시지 없음");
 } catch (e) {
   fail("확인 도중 멈춤: " + e.message);
 } finally {
   try { ws?.close(); } catch {}
+  await stopServer().catch(() => {});
   browser.kill();
 }
 
 console.log(`\n결과: 통과 ${ok.length}개, 실패 ${bad.length}개`);
 console.log("사진: " + SHOTS + "  (" + readdirSync(SHOTS).length + "장)");
-console.log("이 도구로 확인 못 하는 것: 실제 폰에서 손으로 만졌을 때 느낌, 받아 온 날씨가 창밖 날씨와 맞는지, 10초 기다림 뒤 포기하는 것(시간이 오래 걸려 빼 둠)\n");
+console.log("이 도구로 확인 못 하는 것: 실제 폰에서 손으로 만졌을 때 느낌, 받아 온 날씨가 창밖 날씨와 맞는지, 10초 기다림 뒤 포기하는 것(시간이 오래 걸려 빼 둠), 진짜 폰 홈 화면에 설치되는 모습(안드로이드 · 아이폰)\n");
 process.exit(bad.length ? 1 : 0);

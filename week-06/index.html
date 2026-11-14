@@ -4,6 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>우리 동네 날씨</title>
+  <meta name="description" content="평택시의 지금 날씨와 오늘 가장 높은 · 낮은 기온">
+  <meta name="theme-color" content="#1d4ed8">
+  <script>
+    // 설치용 manifest 는 웹 주소(GitHub Pages)로 열었을 때만 붙여요.
+    // 파일을 두 번 눌러 열면(file://) 브라우저가 manifest 를 막아서 오류가 나기 때문이에요.
+    if (location.protocol.startsWith("http")) {
+      const link = document.createElement("link");
+      link.rel = "manifest";
+      link.href = "manifest.webmanifest";
+      document.head.appendChild(link);
+    }
+  </script>
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="동네 날씨">
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; }
@@ -42,6 +60,12 @@
     .low { color: #1d4ed8; }
     .time { margin: 16px 0 0; font-size: 13px; color: #64748b; }
 
+    .stale {
+      margin: 0 0 20px; padding: 12px 14px; border-radius: 14px; text-align: left;
+      background: #fffbeb; border: 1px solid #fcd34d; color: #78350f; font-size: 14px; line-height: 1.5;
+    }
+    .stale b { display: block; font-size: 15px; color: #92400e; }
+
     .loading { font-size: 18px; color: #334155; padding: 24px 0; }
     .error { background: #fef2f2; border: 1px solid #fecaca; border-radius: 16px; padding: 20px; }
     .error h2 { margin: 0; font-size: 20px; color: #b91c1c; }
@@ -63,10 +87,11 @@
     <div id="loading" class="box loading" role="status">날씨를 불러오는 중이에요…</div>
 
     <div id="weather" class="box" hidden>
+      <p id="stale" class="stale" role="alert" hidden><b>지금 정보가 아니에요</b><span id="stale-why"></span></p>
       <p class="now-temp" id="now-temp"></p>
       <p class="now-word" id="now-word"></p>
       <p class="minmax">
-        <span>오늘 가장 높은 기온 <b class="high" id="high"></b></span>
+        <span><span id="day-label">오늘</span> 가장 높은 기온 <b class="high" id="high"></b></span>
         <span>가장 낮은 기온 <b class="low" id="low"></b></span>
       </p>
       <p class="time" id="time"></p>
@@ -124,7 +149,47 @@
       $("reload").disabled = which === "loading";
     }
 
+    // ── 마지막으로 받은 날씨 기억하기 (이 폰 · 이 브라우저 안에만 저장돼요) ──
+    const SAVE_KEY = "pt-weather-last";
+    function saveLast(w) {
+      try { localStorage.setItem(SAVE_KEY, JSON.stringify(w)); } catch (e) {}
+    }
+    function loadLast() {
+      try {
+        const w = JSON.parse(localStorage.getItem(SAVE_KEY));
+        return w && typeof w.savedAt === "number" && [w.nowTemp, w.code, w.high, w.low].every(Number.isFinite) ? w : null;
+      } catch (e) { return null; }
+    }
+    // 받은 때를 "11월 14일 오후 3:50" 처럼 한국 시간으로
+    function whenText(ms) {
+      return new Date(ms).toLocaleString("ko-KR", {
+        timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "numeric", minute: "2-digit",
+      });
+    }
+
+    // 날씨 보여 주기. why 가 있으면 예전에 받은 정보라는 것과 그 까닭을 같이 보여 줘요
+    function render(w, why) {
+      $("now-temp").textContent = temp(w.nowTemp);
+      $("now-word").textContent = weatherWord(w.code);
+      $("high").textContent = temp(w.high);
+      $("low").textContent = temp(w.low);
+      if (why) {
+        const when = whenText(w.savedAt);
+        $("stale-why").textContent = why + " 아래는 " + when + "에 받은 정보예요.";
+        $("day-label").textContent = "그날";
+        $("time").textContent = when + "에 받음 · wttr.in";
+      } else {
+        $("day-label").textContent = "오늘";
+        $("time").textContent = koreaTime(w.obs) + " 관측 · wttr.in";
+      }
+      $("stale").hidden = !why;
+      show("weather");
+    }
+
+    // 못 받아 왔을 때: 예전에 받은 게 있으면 그걸 까닭과 함께, 없으면 까닭만
     function showError(why) {
+      const last = loadLast();
+      if (last) { render(last, why); return; }
       $("error-why").textContent = why;
       show("error");
     }
@@ -144,7 +209,7 @@
       show("loading");
 
       if (navigator.onLine === false) {
-        showError("인터넷에 연결돼 있지 않아요. 와이파이나 데이터를 켠 뒤 '다시 불러오기'를 눌러 주세요.");
+        showError("인터넷이 끊겨 있어요. 와이파이나 데이터를 켜면 새 날씨를 받아 와요.");
         return;
       }
 
@@ -188,16 +253,19 @@
         return;
       }
 
-      $("now-temp").textContent = temp(nowTemp);
-      $("now-word").textContent = weatherWord(code);
-      $("high").textContent = temp(high);
-      $("low").textContent = temp(low);
-      $("time").textContent = koreaTime(now.observation_time) + " 관측 · wttr.in";
-      show("weather");
+      const w = { nowTemp, code, high, low, obs: now.observation_time, savedAt: Date.now() };
+      saveLast(w);
+      render(w, null);
     }
 
     $("reload").addEventListener("click", loadWeather);
+    window.addEventListener("online", loadWeather); // 인터넷이 다시 켜지면 저절로 새로 받기
     loadWeather();
+
+    // 폰에 설치되는 앱: 서비스 워커 등록 (파일을 두 번 눌러 열었을 때는 쓸 수 없어서 건너뜀)
+    if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    }
   </script>
 </body>
 </html>
