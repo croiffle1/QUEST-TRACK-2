@@ -1369,7 +1369,8 @@ function drawWorld(time, camX) {
     const sh = (b.state === "windup" || b.state === "roar") ? Math.round(Math.sin(time * 60) * 1.5) : 0;
     if (b.type === "frog") {
       const air = b.state === "air", f = air ? (b.vy < 0 ? 1 : 2) : frameOf(SHEETS.frogIdle, b.t);
-      drawSheet(air ? "frogJump" : "frogIdle", f, b.x - 35 + sh, b.y - 60, { k: 2, flip: b.dir > 0, filter });
+      const toad = "sepia(0.6) saturate(1.4) brightness(0.9)"; // 두꺼비 왕: 연한 초록빛이 도는 갈색
+      drawSheet(air ? "frogJump" : "frogIdle", f, b.x - 35 + sh, b.y - 60, { k: 2, flip: b.dir > 0, filter: filter === "none" ? toad : filter });
     } else {
       const squat = b.state === "crouch" ? 12 : 0;
       drawSpr("ogre", b.x - 48 + sh, b.y - 96 + squat, { w: 96, h: 96 - squat, flip: b.dir > 0, filter });
