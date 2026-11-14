@@ -81,28 +81,35 @@
   </main>
 
   <script>
-    // 평택시 (Open-Meteo 지명 검색 결과). API 키 없이 쓰는 주소예요.
+    // 평택시 (Open-Meteo 지명 검색으로 찾은 위도 · 경도).
+    // 날씨는 wttr.in 에서 받아요. API 키 없이 쓰는 주소예요.
+    // (Open-Meteo 날씨 서버는 이 컴퓨터의 인터넷에서 연결이 안 돼서 바꿨어요.)
     const PLACE = { lat: 36.99472, lon: 127.08889 };
-    const API = "https://api.open-meteo.com/v1/forecast"
-      + "?latitude=" + PLACE.lat + "&longitude=" + PLACE.lon
-      + "&current=temperature_2m,weather_code"
-      + "&daily=temperature_2m_max,temperature_2m_min"
-      + "&timezone=Asia%2FSeoul&forecast_days=1";
+    const API = "https://wttr.in/" + PLACE.lat + "," + PLACE.lon + "?format=j1";
     const WAIT_LIMIT = 10000; // 10초 넘게 답이 없으면 포기
 
-    // 날씨 번호(WMO) → 한국어 낱말
+    // wttr.in 날씨 번호 → 한국어 낱말
     const WEATHER_WORDS = {
-      0: "맑음",
-      1: "대체로 맑음", 2: "구름 조금", 3: "흐림",
-      45: "안개", 48: "서리 안개",
-      51: "약한 이슬비", 53: "이슬비", 55: "강한 이슬비",
-      56: "어는 이슬비", 57: "강한 어는 이슬비",
-      61: "약한 비", 63: "비", 65: "강한 비",
-      66: "어는 비", 67: "강한 어는 비",
-      71: "약한 눈", 73: "눈", 75: "강한 눈", 77: "싸락눈",
-      80: "약한 소나기", 81: "소나기", 82: "강한 소나기",
-      85: "약한 눈보라", 86: "강한 눈보라",
-      95: "뇌우", 96: "우박을 동반한 뇌우", 99: "강한 우박을 동반한 뇌우",
+      113: "맑음", 116: "구름 조금", 119: "흐림", 122: "매우 흐림",
+      143: "옅은 안개", 248: "안개", 260: "어는 안개",
+      176: "곳에 따라 비", 179: "곳에 따라 눈", 182: "곳에 따라 진눈깨비",
+      185: "곳에 따라 어는 이슬비", 200: "곳에 따라 천둥",
+      227: "날리는 눈", 230: "눈보라",
+      263: "곳에 따라 약한 이슬비", 266: "약한 이슬비",
+      281: "어는 이슬비", 284: "강한 어는 이슬비",
+      293: "곳에 따라 약한 비", 296: "약한 비", 299: "가끔 비", 302: "비",
+      305: "가끔 강한 비", 308: "강한 비",
+      311: "약한 어는 비", 314: "어는 비",
+      317: "약한 진눈깨비", 320: "진눈깨비",
+      323: "곳에 따라 약한 눈", 326: "약한 눈", 329: "곳에 따라 눈", 332: "눈",
+      335: "곳에 따라 많은 눈", 338: "많은 눈",
+      350: "싸락우박",
+      353: "약한 소나기", 356: "소나기", 359: "강한 소나기",
+      362: "약한 진눈깨비 소나기", 365: "진눈깨비 소나기",
+      368: "약한 눈 소나기", 371: "눈 소나기",
+      374: "약한 싸락우박 소나기", 377: "싸락우박 소나기",
+      386: "곳에 따라 비와 천둥", 389: "비와 천둥",
+      392: "곳에 따라 눈과 천둥", 395: "눈과 천둥",
     };
     function weatherWord(code) {
       return WEATHER_WORDS[code] || "알 수 없는 날씨 (번호 " + code + ")";
@@ -123,6 +130,15 @@
     }
 
     const temp = (n) => Math.round(n) + "°";
+
+    // 관측 시각은 영국 시간("06:46 AM")으로 와서 한국 시간(+9시간)으로 바꿔요
+    function koreaTime(utc) {
+      const m = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(utc || "");
+      if (!m) return "관측 시각 모름";
+      let h = Number(m[1]) % 12 + (m[3] === "PM" ? 12 : 0);
+      h = (h + 9) % 24;
+      return "오늘 " + String(h).padStart(2, "0") + ":" + m[2];
+    }
 
     async function loadWeather() {
       show("loading");
@@ -159,19 +175,24 @@
         return;
       }
 
-      const now = data && data.current;
-      const day = data && data.daily;
-      if (!now || typeof now.temperature_2m !== "number" || typeof now.weather_code !== "number"
-          || !day || !day.temperature_2m_max || !day.temperature_2m_min) {
+      // wttr.in 은 숫자를 글자("12")로 보내서 숫자로 바꿔요
+      const now = data && data.current_condition && data.current_condition[0];
+      const day = data && data.weather && data.weather[0];
+      const nowTemp = Number(now && now.temp_C);
+      const code = Number(now && now.weatherCode);
+      const high = Number(day && day.maxtempC);
+      const low = Number(day && day.mintempC);
+      if (!now || !day || [now.temp_C, now.weatherCode, day.maxtempC, day.mintempC].some((v) => v === undefined || v === "")
+          || [nowTemp, code, high, low].some(Number.isNaN)) {
         showError("날씨 정보 중 빠진 것이 있어서 보여 줄 수 없어요.");
         return;
       }
 
-      $("now-temp").textContent = temp(now.temperature_2m);
-      $("now-word").textContent = weatherWord(now.weather_code);
-      $("high").textContent = temp(day.temperature_2m_max[0]);
-      $("low").textContent = temp(day.temperature_2m_min[0]);
-      $("time").textContent = (now.time || "").replace("T", " ") + " 기준 · Open-Meteo";
+      $("now-temp").textContent = temp(nowTemp);
+      $("now-word").textContent = weatherWord(code);
+      $("high").textContent = temp(high);
+      $("low").textContent = temp(low);
+      $("time").textContent = koreaTime(now.observation_time) + " 관측 · wttr.in";
       show("weather");
     }
 

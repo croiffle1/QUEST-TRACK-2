@@ -25,7 +25,7 @@ const APP = resolve(WEEK, target, "index.html");
 const SHOTS = join(HERE, "shots");
 const TMP = join(HERE, ".browser-tmp");
 const PORT = 9334;
-const API_HOST = "api.open-meteo.com";
+const API_HOST = "wttr.in";
 
 const BROWSERS = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -94,10 +94,11 @@ async function onRequest(p) {
   if (mode === "mock") return send("Fetch.fulfillRequest", { requestId, responseCode: 200, responseHeaders: CORS, body: b64(JSON.stringify(mockData)) });
 }
 
+// wttr.in 과 같은 모양의 가짜 날씨 (숫자도 글자로 옴, 관측 시각은 영국 시간)
 function fakeWeather(t, code, hi, lo) {
   return {
-    current: { time: "2026-11-14T15:00", temperature_2m: t, weather_code: code },
-    daily: { time: ["2026-11-14"], temperature_2m_max: [hi], temperature_2m_min: [lo] },
+    current_condition: [{ temp_C: String(t), weatherCode: String(code), observation_time: "06:46 AM" }],
+    weather: [{ date: "2026-11-14", maxtempC: String(hi), mintempC: String(lo) }],
   };
 }
 
@@ -211,23 +212,26 @@ try {
 
   // 4. 다시 불러오기
   console.log("[다시 불러오기 단추]");
-  mockData = fakeWeather(3.4, 0, 9.6, -1.2);
+  mockData = fakeWeather(3.4, 113, 9.6, -1.2);
   mode = "mock";
   await js(`document.getElementById("reload").click()`);
   const again = await waitState("weather", 5000);
+  const againTime = await js(`document.getElementById("time").innerText`);
   again.state === "weather" && again.temp === "3°" && again.word === "맑음" && again.high === "10°" && again.low === "-1°"
     ? pass("못 받은 뒤 단추를 누르면 다시 받아 와서 보여 줌 (3.4 → 3°, 9.6 → 10°, -1.2 → -1°)")
     : fail(`다시 불러오기 뒤: ${JSON.stringify(again)}`);
+  againTime.includes("오늘 15:46") ? pass("관측 시각을 한국 시간으로 바꿈 (06:46 AM → 오늘 15:46)") : fail("관측 시각: " + againTime);
 
   // 5. 날씨 번호 → 한국어
   console.log("[날씨 번호 바꾸기]");
-  const CODES = [0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99];
+  const CODES = [113, 116, 119, 122, 143, 176, 179, 182, 185, 200, 227, 230, 248, 260, 263, 266, 281, 284, 293, 296, 299, 302, 305, 308,
+    311, 314, 317, 320, 323, 326, 329, 332, 335, 338, 350, 353, 356, 359, 362, 365, 368, 371, 374, 377, 386, 389, 392, 395];
   const words = await js(`${JSON.stringify(CODES)}.map((c) => [c, weatherWord(c)])`);
   const notKo = words.filter(([, w]) => w.includes("알 수 없는") || /[A-Za-z]/.test(w));
   notKo.length ? fail("한국어로 안 바뀐 번호: " + notKo.map(([c]) => c).join(", ")) : pass(`날씨 번호 ${CODES.length}개가 모두 한국어 낱말로 바뀜`);
   const map = Object.fromEntries(words);
-  map[0] === "맑음" && map[63] === "비" && map[73] === "눈" && map[3] === "흐림"
-    ? pass("0 → 맑음, 3 → 흐림, 63 → 비, 73 → 눈") : fail(`0 → ${map[0]}, 3 → ${map[3]}, 63 → ${map[63]}, 73 → ${map[73]}`);
+  map[113] === "맑음" && map[119] === "흐림" && map[302] === "비" && map[332] === "눈"
+    ? pass("113 → 맑음, 119 → 흐림, 302 → 비, 332 → 눈") : fail(`113 → ${map[113]}, 119 → ${map[119]}, 302 → ${map[302]}, 332 → ${map[332]}`);
   const unknown = await js(`weatherWord(42)`);
   unknown.includes("42") ? pass(`모르는 번호도 비우지 않고 알려 줌 (42 → "${unknown}")`) : fail("모르는 번호 42 → " + unknown);
 
@@ -248,8 +252,8 @@ try {
     const card = document.querySelector(".card").getBoundingClientRect();
     return { W, scrollW: document.documentElement.scrollWidth, out, card: Math.round(card.width) };
   })()`;
-  // 가장 긴 날씨 낱말과 큰 숫자로 시험 (영하 두 자리)
-  mockData = fakeWeather(-18.4, 99, -10.2, -23.8);
+  // 긴 날씨 낱말과 큰 숫자로 시험 (영하 두 자리)
+  mockData = fakeWeather(-18, 392, -10, -24);
   for (const [w, h, mobile, name] of SIZES) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile });
     for (const [m, label] of [["mock", "날씨"], ["offline", "못받음"]]) {
