@@ -214,7 +214,8 @@ try {
   await shot("1-다시열기");
   const b2 = await js(ITEM_INFO);
   const same = b2.pos.filter((p) => b1.pos.includes(p)).length;
-  same < b2.pos.length
+  if (await js(`!!__G.fixedItems`)) console.log(`     (${NAME} 자리가 맵에 정해진 게임이라 "다시 열면 자리가 바뀜"은 건너뜀)`);
+  else same < b2.pos.length
     ? pass(`다시 열면 ${NAME} 자리가 바뀜 (${b2.pos.length}개 중 ${same}개만 같은 자리)`)
     : fail(`다시 열어도 ${NAME} 자리가 그대로임`);
   const START = await js(`({ x: player.x, y: player.y })`);
@@ -283,8 +284,8 @@ try {
   await js(`(() => { player.x = ${START.x}; player.vx = 0; })()`); // 머리 위가 트인 시작 자리에서 뛰어 봄
   await sleep(500);
   const groundY = await js(`player.y`);
-  await hold("Space", 50);
-  await sleep(120);
+  await hold("Space", 160); // 짧게 누르면 낮게 뛰는 게임도 있어서 사람처럼 조금 길게 누름
+  await sleep(40);
   const jumpState = await js(`({ y: player.y, anim: player.anim })`);
   await shot("4-점프");
   jumpState.y < groundY ? pass("스페이스를 누르면 뛰어오름") : fail("스페이스를 눌러도 안 뜀");
@@ -311,10 +312,17 @@ try {
 
   // 6. 길 찾기
   console.log("[갈 수 있는 곳]");
-  const reach = await js(REACH_TEST);
-  reach.got === reach.total
-    ? pass(`시작 자리에서 ${NAME}가 놓일 수 있는 자리 ${reach.total}곳 모두에 닿을 수 있음 (서 볼 수 있는 자리 ${reach.places}곳)`)
-    : fail(`${NAME}가 놓일 수 있는 자리 ${reach.total}곳 중 ${reach.got}곳만 닿음. 못 닿는 칸(가로, 세로): ${reach.missed.join(" ")}`);
+  // 스테이지가 여러 개면 스테이지마다 확인 (자리 = 금화 + 물약 + 출구)
+  const stageCount = await js(`__G.stages || 1`);
+  for (let s = 0; s < stageCount; s++) {
+    if (stageCount > 1) await js(`(() => { __G.setStage(${s}); __G.setHazards(false); })()`);
+    const label = stageCount > 1 ? `스테이지 ${s + 1}: ` : "";
+    const reach = await js(REACH_TEST);
+    reach.got === reach.total
+      ? pass(`${label}시작 자리에서 ${NAME}가 놓일 수 있는 자리 ${reach.total}곳 모두에 닿을 수 있음 (서 볼 수 있는 자리 ${reach.places}곳)`)
+      : fail(`${label}${NAME}가 놓일 수 있는 자리 ${reach.total}곳 중 ${reach.got}곳만 닿음. 못 닿는 칸(가로, 세로): ${reach.missed.join(" ")}`);
+  }
+  if (stageCount > 1) await js(`(() => { __G.setStage(0); __G.setHazards(false); })()`);
 
   // 7. 아이템 먹기와 다시 나오기
   console.log(`[${NAME}]`);
@@ -340,7 +348,9 @@ try {
     return { n, gone, sc, back };
   })()`);
   eat.gone === eat.n && eat.sc === eat.n ? pass(`${NAME}에 닿으면 사라지고 점수가 오름 (${eat.n}개 → 점수 +${eat.sc})`) : fail(`${NAME} 먹기 이상: 사라진 것 ${eat.gone}개, 점수 +${eat.sc}`);
-  eat.back === eat.n ? pass(`먹은 뒤 ${NAME}가 다시 ${eat.back}개 나옴`) : fail(`먹은 뒤 ${NAME}가 ${eat.back}개만 다시 나옴`);
+  if (await js(`!!__G.fixedItems`)) {
+    eat.back === 0 ? pass(`먹은 ${NAME}는 다시 나오지 않음 (자리가 정해진 게임)`) : fail(`먹은 ${NAME}가 ${eat.back}개 다시 나옴`);
+  } else eat.back === eat.n ? pass(`먹은 뒤 ${NAME}가 다시 ${eat.back}개 나옴`) : fail(`먹은 뒤 ${NAME}가 ${eat.back}개만 다시 나옴`);
   await sleep(100);
   await shot("7-다모음");
   const hudText = await js(`document.getElementById("hud")?.innerText`);
@@ -393,6 +403,272 @@ try {
     !again.gameOver && again.score === 0 && again.lives > 0
       ? pass(`키를 누르면 처음부터 다시 시작 (목숨 ${again.lives}, 점수 0, ${NAME} ${again.items}개)`)
       : fail("게임 끝에서 키를 눌러도 다시 시작하지 않음");
+  }
+
+  // 8-2. 스테이지 게임 (게임에 stages 가 있을 때만): 손맛 장치, 구덩이, 체크포인트, 밟기, 예고, 출구
+  if (await js(`!!__G.stages`)) {
+    console.log("[스테이지와 손맛]");
+    const st = await js(`(() => {
+      muted = true;
+      const out = {};
+      const run = (n) => { for (let i = 0; i < n; i++) update(1 / 60); };
+      const fresh = (s) => { __G.setStage(s); lives = 3; gameOver = false; invincible = 0; hitTimer = 0;
+                             for (const k in keys) keys[k] = false; jumpPressed = false; };
+      __G.setHazards(true);
+
+      __G.setStage(0); out.startInv = invincible;
+
+      // 입력 버퍼: 땅에 닿기 직전에 눌러도 닿자마자 뜀 (손맛만 보려고 몹·함정은 잠깐 끔)
+      __G.setHazards(false);
+      fresh(0); run(60);
+      player.y -= 12; player.vy = 120; player.onGround = false; coyote = 0;
+      jumpPressed = true; out.buffer = false;
+      for (let i = 0; i < 20 && !out.buffer; i++) { update(1 / 60); if (player.vy < -200) out.buffer = true; }
+
+      // 코요테 타임: 땅 끝에서 걸어 나가 떨어지기 시작한 뒤 3프레임 뒤에 눌러도 뜀
+      fresh(0);
+      let edge = 0; while (isSolid(edge + 1, 15)) edge++;
+      player.x = edge * TILE; player.y = 15 * TILE - player.h; player.vy = 0; run(2);
+      keys.ArrowRight = true;
+      for (let f = 0; f < 60 && player.onGround; f++) update(1 / 60);
+      run(3); keys.ArrowRight = false;
+      jumpPressed = true; update(1 / 60);
+      out.coyote = player.vy < -200;
+      __G.setHazards(true);
+
+      // 구덩이: 빠지면 목숨 -1, 체크포인트(처음엔 시작 자리)로 돌아옴
+      fresh(0);
+      const l0 = lives;
+      player.x = (edge + 2) * TILE; player.y = 15 * TILE; player.vy = 100;
+      run(90);
+      out.pit = { l0, l1: lives, back: Math.abs(player.x - respawnAt.x) < 1 && player.y < 15 * TILE, inv: invincible > 0 };
+
+      // 체크포인트
+      fresh(0);
+      const g = graves[0];
+      player.x = g.x; player.y = g.y + 16 - player.h; player.vy = 0; update(1 / 60);
+      out.checkpoint = g.on && respawnAt.x === g.x;
+
+      // 슬라임 밟기
+      fresh(0);
+      const sl = enemies.find((e) => e.kind === "slime");
+      const lb = lives;
+      const slTop = typeof enemyBox === "function" ? enemyBox(sl).y : sl.y - 10;
+      player.x = sl.x - player.w / 2; player.y = slTop - 2 - player.h; player.vy = 200; player.onGround = false;
+      run(3);
+      out.stomp = { dead: !sl.alive, safe: lives === lb, bounce: player.vy < 0 };
+
+      // 유령은 밟아도 다침
+      fresh(1);
+      const gh = enemies.find((e) => e.kind === "ghost");
+      const lg = lives;
+      player.x = gh.x - player.w / 2; player.y = gh.y - 7 - player.h + 3; player.vy = 200; update(1 / 60);
+      out.ghost = lives === lg - 1 && gh.alive;
+
+      // 떨어지는 철퇴: 먼저 예고하고, 그다음 떨어짐
+      fresh(2);
+      const d = balls.find((b) => b.type === "drop");
+      player.x = d.x - player.w / 2; player.y = 15 * TILE - player.h; player.vy = 0;
+      update(1 / 60); out.warn1 = d.state;
+      run(20); out.warn2 = d.state; out.still = d.y === d.homeY;
+      run(40); out.fell = d.y > d.homeY;
+
+      // 대시 (게임에 있을 때만)
+      if (typeof DASH_TIME !== "undefined") {
+        // 땅에서 대시하면 걷기보다 훨씬 멀리 감
+        fresh(0); run(30);
+        let x0 = player.x; dashPressed = true; run(12);
+        out.dashDist = Math.round(player.x - x0);
+        out.walkDist = Math.round(SPEED * 12 / 60);
+        // 대시 중에는 철퇴에 닿아도 안 다침
+        fresh(0); run(30);
+        const ball = balls.find((b) => b.type === "roll");
+        dashPressed = true; update(1 / 60);
+        const ld = lives;
+        player.x = ball.x - player.w / 2; player.y = ball.y - player.h / 2; update(1 / 60);
+        out.dashSafe = lives === ld;
+        // 공중에서는 한 번만: 대시가 끝나고 쿨타임이 지나도 땅에 닿기 전에는 다시 못 함
+        fresh(0); run(30);
+        player.y -= 100; player.vy = 0; player.onGround = false;
+        dashPressed = true; update(1 / 60);
+        const first = dashTime > 0;
+        dashTime = 0; dashCool = 0; dashPressed = true; update(1 / 60);
+        out.airOnce = first && dashTime <= 0;
+      }
+
+      // 싸우기 (게임에 공격이 있을 때만)
+      if (typeof attackBox === "function") {
+        const arrows = () => shots.filter((s) => s.kind === "arrow").length;
+        // 할퀴기로 슬라임(체력 1) 무찌르기 → 금화를 떨어뜨림
+        fresh(0);
+        const s1 = enemies.find((e) => e.kind === "slime");
+        player.x = s1.x - 14 - player.w; player.y = 15 * TILE - player.h; player.vy = 0; player.facing = 1;
+        const near = () => coins.some((k) => Math.abs(k.x - s1.x) < 12 && Math.abs(k.y - s1.y) < 12);
+        const had = near();
+        attackPressed = true; run(2);
+        out.atkSlime = { dead: !s1.alive, coin: !had && near(), safe: lives === 3 };
+        // 유령(체력 2): 한 번 맞으면 체력만 줄고, 두 번 맞으면 무찌름
+        fresh(1); __G.setHazards(false);
+        const g2 = enemies.find((e) => e.kind === "ghost");
+        const swing = () => { player.x = g2.x - 14 - player.w; player.y = g2.y - player.h / 2; player.vy = 0; player.facing = 1;
+                              attackCool = 0; attackPressed = true; update(1 / 60); update(1 / 60); };
+        swing(); const hp1 = g2.hp, alive1 = g2.alive; run(20); swing();
+        out.ghost2 = { hp1, alive1, dead: !g2.alive };
+        // 불덩이는 할퀴면 사라짐
+        fresh(3);
+        player.facing = 1;
+        shots = [{ kind: "fire", x: player.x + player.w + 10, y: player.y + 10, vx: -40, vy: 0, w: 9, h: 9, life: 3 }];
+        attackPressed = true; update(1 / 60);
+        out.deflect = shots.length === 0;
+        __G.setHazards(true);
+        // 외눈 거인: 빨개진 채로 제자리에서 기다렸다가(windup) 돌진
+        fresh(3); invincible = 99;
+        const og = enemies.find((e) => e.kind === "ogre"); og.cool = 0;
+        player.x = og.x + 70; player.y = 15 * TILE - player.h; player.vy = 0;
+        update(1 / 60); out.ogre1 = og.state; const ox = og.x;
+        run(20); out.ogre2 = og.state; out.ogreStill = Math.abs(og.x - ox) < 0.5;
+        run(30); out.ogre3 = og.state;
+        // 마법사: 손이 빛나는 동안(cast)은 안 쏘고, 그다음 불덩이
+        fresh(3); invincible = 99;
+        const mg = enemies.find((e) => e.kind === "mage"); mg.timer = 0;
+        player.x = mg.x - 100; player.y = 15 * TILE - player.h; player.vy = 0;
+        update(1 / 60); out.mage1 = mg.state;
+        run(30); out.mageWait = !shots.some((s) => s.kind === "fire");
+        run(30); out.mageFire = shots.some((s) => s.kind === "fire");
+        // 가고일: 눈이 빨개진 뒤(warn) 화살
+        fresh(2); invincible = 99;
+        const ga = gargoyles[0]; ga.timer = 0; ga.state = "idle";
+        player.x = ga.x - 120; player.y = 15 * TILE - player.h; player.vy = 0;
+        update(1 / 60); out.garg1 = ga.state;
+        run(20); out.gargWait = arrows() === 0;
+        run(30); out.gargFire = arrows() > 0;
+        // 솟는 가시: 내려가 있음 → 덜컹(warn) → 솟음(up)
+        fresh(1); invincible = 99;
+        const pp = pops[0], seq = [];
+        for (let i = 0; i < 240; i++) { update(1 / 60); invincible = 99; if (seq[seq.length - 1] !== pp.state) seq.push(pp.state); }
+        out.pops = seq.join(">");
+        // 보스: 쓰러뜨리기 전에는 보물상자가 잠겨 있음
+        fresh(4); invincible = 99;
+        out.bossHas = !!boss; out.locked = exit.locked;
+        player.x = exit.x; player.y = exit.y + 16 - player.h; player.vy = 0; update(1 / 60);
+        out.lockedPhase = phase;
+        // 보스 공격 순서: 예고(windup / crouch / roar) 바로 뒤에만 공격(charge / leap / 바위)
+        fresh(4);
+        player.x = boss.x - 200; player.y = 15 * TILE - player.h; player.vy = 0;
+        const bseq = [];
+        for (let i = 0; i < 60 * 14 && boss; i++) { invincible = 99; update(1 / 60); if (boss && bseq[bseq.length - 1] !== boss.state) bseq.push(boss.state); }
+        out.bossSeq = bseq.join(">");
+        // 보스를 할퀴어서 쓰러뜨리면 보물상자가 열림
+        let swings = 0;
+        while (boss && boss.hp > 0 && swings < 300) {
+          invincible = 99;
+          player.x = boss.x - boss.w / 2 - player.w - 4; player.y = boss.y - player.h; player.vy = 0; player.facing = 1;
+          attackCool = 0; attackPressed = true; run(4); swings++;
+        }
+        out.bossSwings = swings;
+        run(150);
+        out.bossGone = !boss; out.unlocked = !exit.locked;
+      }
+      muted = false;
+      return out;
+    })()`);
+    st.startInv > 0.5 ? pass(`스테이지가 시작되면 ${st.startInv}초 동안 무적 (시작 직후 보호)`) : fail("스테이지 시작 직후 무적이 없음");
+    st.buffer ? pass("땅에 닿기 직전에 누른 점프도 닿자마자 뜀 (입력 버퍼)") : fail("땅에 닿기 직전에 누른 점프가 무시됨");
+    st.coyote ? pass("땅 끝에서 떨어지기 시작한 직후에 눌러도 점프됨 (코요테 타임)") : fail("땅 끝에서 막 떨어진 뒤 점프가 안 됨");
+    st.pit.l1 === st.pit.l0 - 1 && st.pit.back && st.pit.inv
+      ? pass(`구덩이에 빠지면 목숨 -1 (${st.pit.l0} → ${st.pit.l1}), 체크포인트로 돌아오고 잠깐 무적`)
+      : fail(`구덩이 이상: 목숨 ${st.pit.l0} → ${st.pit.l1}, 돌아옴 ${st.pit.back}, 무적 ${st.pit.inv}`);
+    st.checkpoint ? pass("묘비에 닿으면 체크포인트가 켜지고 다시 시작할 자리가 바뀜") : fail("묘비 체크포인트가 켜지지 않음");
+    st.stomp.dead && st.stomp.safe && st.stomp.bounce ? pass("슬라임을 위에서 밟으면 슬라임이 사라지고 여우는 튀어 오름, 목숨 그대로")
+      : fail(`슬라임 밟기 이상: 사라짐 ${st.stomp.dead}, 목숨 그대로 ${st.stomp.safe}, 튀어 오름 ${st.stomp.bounce}`);
+    st.ghost ? pass("유령은 위에서 밟아도 다침 (밟을 수 없는 적)") : fail("유령을 밟았는데 다치지 않음");
+    st.warn1 === "warn" && st.warn2 === "warn" && st.still && st.fell
+      ? pass("떨어지는 철퇴는 먼저 0.7초 동안 흔들리고 땅에 빨간 표시를 한 뒤 떨어짐 (공격 예고)")
+      : fail(`철퇴 예고 이상: ${st.warn1} → ${st.warn2}, 제자리 ${st.still}, 떨어짐 ${st.fell}`);
+    if (st.dashDist !== undefined) {
+      st.dashDist > st.walkDist * 1.8 ? pass(`대시하면 0.2초 동안 ${st.dashDist}px 감 (걸으면 ${st.walkDist}px)`) : fail(`대시 거리 ${st.dashDist}px 가 걷기 ${st.walkDist}px 와 별 차이 없음`);
+      st.dashSafe ? pass("대시하는 동안은 철퇴에 닿아도 안 다침 (피하기 기술)") : fail("대시 중에 철퇴에 맞음");
+      st.airOnce ? pass("공중 대시는 땅에 닿기 전까지 한 번만") : fail("공중에서 대시가 여러 번 됨 (또는 첫 대시가 안 됨)");
+    }
+    if (st.atkSlime) {
+      console.log("[싸우기와 함정 예고]");
+      st.atkSlime.dead && st.atkSlime.coin && st.atkSlime.safe ? pass("Z 로 할퀴면 슬라임이 쓰러지고 금화를 떨어뜨림")
+        : fail(`할퀴기 이상: 쓰러짐 ${st.atkSlime.dead}, 금화 ${st.atkSlime.coin}, 목숨 그대로 ${st.atkSlime.safe}`);
+      st.ghost2.alive1 && st.ghost2.hp1 === 1 && st.ghost2.dead ? pass("유령은 체력 2: 한 번 할퀴면 버티고, 두 번이면 쓰러짐")
+        : fail(`유령 체력 이상: 첫 번째 뒤 체력 ${st.ghost2.hp1}, 살아 있음 ${st.ghost2.alive1}, 두 번째 뒤 쓰러짐 ${st.ghost2.dead}`);
+      st.deflect ? pass("날아오는 불덩이를 할퀴면 사라짐 (튕겨냄)") : fail("불덩이를 할퀴어도 안 사라짐");
+      st.ogre1 === "windup" && st.ogre2 === "windup" && st.ogreStill && (st.ogre3 === "charge" || st.ogre3 === "rest")
+        ? pass("외눈 거인은 0.65초 동안 제자리에서 빨갛게 깜빡인 뒤 돌진 (공격 예고)")
+        : fail(`거인 예고 이상: ${st.ogre1} → ${st.ogre2} → ${st.ogre3}, 제자리 ${st.ogreStill}`);
+      st.mage1 === "cast" && st.mageWait && st.mageFire ? pass("마법사는 0.8초 동안 손에 불을 모은 뒤 불덩이를 쏨 (공격 예고)")
+        : fail(`마법사 예고 이상: ${st.mage1}, 기다림 ${st.mageWait}, 쏨 ${st.mageFire}`);
+      st.garg1 === "warn" && st.gargWait && st.gargFire ? pass("가고일은 0.6초 동안 눈이 빨개진 뒤 화살을 쏨 (함정 예고)")
+        : fail(`가고일 예고 이상: ${st.garg1}, 기다림 ${st.gargWait}, 쏨 ${st.gargFire}`);
+      st.pops.includes("down>warn>up") ? pass("솟는 가시는 덜컹거린 뒤에 솟음 (함정 예고)") : fail("솟는 가시 순서 이상: " + st.pops);
+      console.log("[보스]");
+      st.bossHas && st.locked && st.lockedPhase === "play" ? pass("마지막 스테이지에 문지기가 있고, 쓰러뜨리기 전에는 보물상자가 잠겨 있음")
+        : fail(`보스·잠금 이상: 보스 ${st.bossHas}, 잠김 ${st.locked}, 상자에 닿았을 때 ${st.lockedPhase}`);
+      const bs = st.bossSeq.split(">");
+      const okOrder = bs.every((s, i) => (s !== "charge" || bs[i - 1] === "windup") && (s !== "leap" || bs[i - 1] === "crouch"));
+      const all3 = ["windup", "crouch", "roar"].every((s) => bs.includes(s));
+      okOrder && all3 ? pass("문지기는 돌진·내려찍기·바위 세 가지를 쓰고, 공격마다 먼저 예고함")
+        : fail("문지기 공격 순서 이상: " + st.bossSeq);
+      console.log("     (문지기 상태 순서: " + st.bossSeq + ")");
+      st.bossGone && st.unlocked ? pass(`문지기를 할퀴어서 쓰러뜨리면(${st.bossSwings}번) 보물상자가 열림`)
+        : fail(`문지기를 쓰러뜨려도 이상: 사라짐 ${st.bossGone}, 열림 ${st.unlocked}`);
+    }
+    // 대시 잔상 사진
+    await js(`(() => { __G.setStage(0); __G.setHazards(false); cardTime = 0; player.x = 120; player.y = 15 * TILE - player.h; player.facing = 1; dashPressed = true; })()`);
+    await sleep(90);
+    await shot("11-대시");
+    await js(`__G.setHazards(true)`);
+
+    // 예고 장면 사진
+    await js(`(() => { __G.setStage(2); invincible = 99; const d = balls.find((b) => b.type === "drop");
+                       player.x = d.x - player.w / 2; player.y = 15 * TILE - player.h; cardTime = 0; update(1 / 60); })()`);
+    await sleep(150);
+    await shot("11-철퇴예고");
+
+    // 출구 → 클리어 화면 → 키 → 다음 스테이지
+    const c1 = await js(`(() => { __G.setStage(0); invincible = 0; player.x = exit.x; player.y = exit.y + 16 - player.h; player.vy = 0;
+                                  update(1 / 60); return { phase, text: document.getElementById("msg").innerText }; })()`);
+    await sleep(100);
+    await shot("12-클리어");
+    c1.phase === "clear" ? pass("보물상자에 닿으면 스테이지 클리어") : fail("보물상자에 닿아도 클리어되지 않음: " + c1.phase);
+    const wait = await js(`CLEAR_WAIT`);
+    await sleep(wait * 1000 + 400);
+    await shot("13-스테이지2");
+    const s2 = await js(`({ stage, phase })`);
+    s2.stage === 1 && s2.phase === "play" ? pass(`키를 안 눌러도 ${wait}초 뒤 스테이지 2 가 바로 시작됨`) : fail(`클리어 뒤 스테이지가 ${s2.stage + 1}, 상태 ${s2.phase}`);
+    // 키를 누르면 기다리지 않고 넘어감
+    await js(`(() => { invincible = 0; player.x = exit.x; player.y = exit.y + 16 - player.h; player.vy = 0; update(1 / 60); })()`);
+    await sleep(300);
+    await key("keyDown", "Enter"); await key("keyUp", "Enter");
+    await sleep(50);
+    const s3 = await js(`({ stage, phase })`);
+    s3.stage === 2 && s3.phase === "play" ? pass("클리어 글자가 떠 있을 때 키를 누르면 기다리지 않고 바로 다음 스테이지") : fail(`키로 넘기기 이상: 스테이지 ${s3.stage + 1}, ${s3.phase}`);
+
+    // 마지막 스테이지 → 모두 클리어 → 키 → 처음부터
+    const c3 = await js(`(() => { __G.setStage(${"__G.stages - 1"}); if (__G.unlockExit) __G.unlockExit(); invincible = 0; player.x = exit.x; player.y = exit.y + 16 - player.h; player.vy = 0;
+                                  update(1 / 60); return { phase, text: document.getElementById("msg").innerText }; })()`);
+    await sleep(100);
+    await shot("14-모두클리어");
+    c3.phase === "allclear" ? pass("마지막 보물상자에 닿으면 모두 클리어 화면이 나옴") : fail("마지막 스테이지 클리어 이상: " + c3.phase);
+    console.log("     (모두 클리어 글자: " + c3.text.replace(/\n+/g, " / ") + ")");
+    await sleep(800);
+    await key("keyDown", "Enter"); await key("keyUp", "Enter");
+    await sleep(200);
+    const s0 = await js(`({ stage, phase, lives, score })`);
+    s0.stage === 0 && s0.phase === "play" && s0.lives === 3 && s0.score === 0
+      ? pass("모두 클리어 뒤 키를 누르면 스테이지 1 부터 새로 시작") : fail(`모두 클리어 뒤: 스테이지 ${s0.stage + 1}, ${s0.phase}, 목숨 ${s0.lives}, 금화 ${s0.score}`);
+
+    // 스테이지마다 가운데쯤 사진 (맵 모양 눈으로 보기)
+    for (let s = 0; s < (await js(`__G.stages`)); s++) {
+      await js(`(() => { __G.setStage(${s}); __G.setHazards(false); cardTime = 0; player.x = WORLD_W / 2; player.y = 3 * TILE; player.vy = 0; })()`);
+      await sleep(700);
+      await shot(`15-스테이지${s + 1}가운데`);
+    }
+    await js(`(() => { __G.setHazards(true); newGame(); })()`);
   }
 
   // 9. 창 크기

@@ -3,19 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>여우와 달밤 묘지</title>
+<title>여우의 지하 던전</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0d0a18; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #07050d; overflow: hidden; }
   body { display: flex; align-items: center; justify-content: center; font-family: "Malgun Gothic", sans-serif; color: #fff; }
   #wrap { position: relative; }
   canvas { display: block; image-rendering: pixelated; }
   #hud { position: absolute; left: 12px; top: 8px; right: 12px; display: flex; gap: 18px; font-size: 20px; font-weight: bold; text-shadow: 2px 2px 0 #000; }
   #hud .hearts { color: #ff5470; letter-spacing: 2px; }
-  #hud .best { margin-left: auto; color: #c9b8ff; }
+  #hud .cherry { color: #ff8fa3; }
+  #hud .right { margin-left: auto; color: #e3dbff; }
   #msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-         background: rgba(0, 0, 0, .55); font-size: 18px; line-height: 1.8; text-align: center; text-shadow: 2px 2px 0 #000; }
+         background: rgba(6, 3, 12, .86); font-size: 16px; line-height: 1.75; text-align: center; text-shadow: 2px 2px 0 #000; }
   #msg.hide { display: none; }
   #msg b { font-size: 30px; color: #ffd54a; }
+  #msg small { color: #c9b8ff; font-size: 15px; }
+  #msg kbd { display: inline-block; min-width: 1.4em; padding: 0 6px; border: 2px solid #8a7fb0; border-radius: 4px; background: #241c38; font: bold 15px "Malgun Gothic", sans-serif; }
 </style>
 </head>
 <body>
@@ -28,20 +31,23 @@
 // ── 화면 크기: 게임 안에서는 480×272, 창에 맞춰 정수 배로 키움 ──
 const W = 480, H = 272, TILE = 16;
 const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+const mainCtx = canvas.getContext("2d");
+let ctx = mainCtx; // 던전에서는 잠깐 앞쪽 그림판(fg)으로 바꿔 그림
+const fgCanvas = document.createElement("canvas"), fctx = fgCanvas.getContext("2d");
 const hud = document.getElementById("hud");
 const msg = document.getElementById("msg");
 let scale = 1;
 function resize() {
   scale = Math.max(1, Math.floor(Math.min(innerWidth / W, innerHeight / H)));
-  canvas.width = W * scale;
-  canvas.height = H * scale;
-  ctx.imageSmoothingEnabled = false; // 픽셀 아트가 흐려지지 않게 (최근접 필터)
+  canvas.width = fgCanvas.width = W * scale;
+  canvas.height = fgCanvas.height = H * scale;
+  mainCtx.imageSmoothingEnabled = false; // 픽셀 아트가 흐려지지 않게 (최근접 필터)
+  fctx.imageSmoothingEnabled = false;
 }
 addEventListener("resize", resize);
 resize();
 
-// ── 에셋 불러오기 (프레임 정보는 drop.json 에서 옮겨 적음) ──
+// ── 에셋 (프레임 정보는 drop.json 에서 옮겨 적음) ──
 const IMG = "assets/images/", SND = "assets/sounds/";
 const FOX = {
   "idle": { file: "fox-player_idle.png", frames: 4, fps: 10, loop: true },
@@ -49,15 +55,31 @@ const FOX = {
   "jump": { file: "fox-player_jump.png", frames: 2, fps: 10, loop: true },
   "hit":  { file: "fox-player_hit.png",  frames: 2, fps: 12, loop: false },
 };
-const FOX_W = 33, FOX_H = 32;
-const COIN = { file: "dungeon-coin_spin.png", fw: 6, fh: 7, frames: 4, fps: 12 };
-const LAYERS = [ // 뒤 레이어일수록 천천히 (speed 는 drop.json 값)
-  { name: "sky",       file: "moonlit-graveyard_background.png", w: 384, h: 224, speed: 0.1, y: 0 },
-  { name: "mountains", file: "moonlit-graveyard_mountains.png",  w: 192, h: 179, speed: 0.3, y: H - 179 },
-  { name: "graves",    file: "moonlit-graveyard_graveyard.png",  w: 384, h: 123, speed: 0.6, y: H - 123 },
+const FOX_W = 26, FOX_H = 27, FOX_OX = 5, FOX_OY = 7; // 26×27 그림 안에서 몸통(16×20)은 (5, 7) 부터
+const SHEETS = { // 가로 한 줄로 이어진 그림들
+  coin:     { file: "dungeon-coin_spin.png",          fw: 6,  fh: 7,  frames: 4, fps: 12 },
+  gem:      { file: "gem-spinning_spin.png",          fw: 13, fh: 11, frames: 5, fps: 12 },
+  cherry:   { file: "cherry_idle.png",                fw: 21, fh: 21, frames: 5, fps: 10 },
+  puff:     { file: "enemy-death-puff_explode.png",   fw: 40, fh: 41, frames: 6, fps: 18 },
+  slash:    { file: "horizontal-slash_strike.png",    fw: 55, fh: 26, frames: 5, fps: 30 },
+  frogIdle: { file: "frog_idle.png",                  fw: 35, fh: 32, frames: 4, fps: 10 },
+  frogJump: { file: "frog_jump.png",                  fw: 35, fh: 32, frames: 3, fps: 10 },
+  opossum:  { file: "opossum_walk.png",               fw: 35, fh: 26, frames: 6, fps: 10 },
+  eagle:    { file: "eagle_fly.png",                  fw: 40, fh: 41, frames: 4, fps: 12 },
+};
+const FOREST_LAYERS = [ // 뒤 레이어일수록 천천히 (speed 는 drop.json 값)
+  { name: "skyBack", file: "parallax-sky-far_back.png",   w: 384, speed: 0.25, y: 0 },
+  { name: "skyMid",  file: "parallax-sky-far_middle.png", w: 176, speed: 0.7,  y: 56 },
 ];
+// 던전 타일셋(16×16 칸) 안의 그림 칸 번호 [가로, 세로]
+const SPR = {
+  slime: [0, 9], ogre: [1, 9], bat: [0, 10], ghost: [1, 10], spider: [2, 10], mage: [3, 9], keeper: [0, 7],
+  banner: [5, 2], chest: [5, 7], potion: [7, 9], gargoyle: [7, 1],
+  pillarTop: [6, 0], pillarBot: [6, 1], barrel: [6, 5], brick: [4, 3], brickBars: [4, 2],
+};
+// 숲 타일셋 칸 번호
+const FT = { top: [3, 1], dirt: [[1, 3], [5, 3], [3, 5], [1, 5], [5, 5]], platL: [15, 14], platM: [17, 14], platR: [19, 14], grass: [[1, 7], [3, 7]] };
 const images = {};
-
 function loadImage(name, file) {
   return new Promise((ok, fail) => {
     const im = new Image();
@@ -72,103 +94,220 @@ const sounds = {
   coin: new Audio(SND + "coin.wav"),
   bgm:  new Audio(SND + "haunted-house-theme.mp3"),
 };
-sounds.bgm.loop = true; // 배경음악은 끝나면 처음부터 다시
+sounds.bgm.loop = true;
 sounds.bgm.volume = 0.4;
 let muted = false;
-function playSfx(name) {
+function playSfx(name, vol = 0.6, rate = 1) {
   if (muted) return;
-  const s = sounds[name].cloneNode(); // 겹쳐서 여러 번 나도록 복사해서 재생
-  s.volume = 0.6;
+  const s = sounds[name].cloneNode();
+  s.volume = vol;
+  s.playbackRate = rate;
   s.play().catch(() => {});
 }
 
-// ── 맵: 가로 60칸, 화면(30칸)보다 넓어서 여우를 따라 화면이 움직임. # 은 땅 ──
-const MAP = [
-  "............................................................",
-  "............................................................",
-  "............................................................",
-  "............................................................",
-  "............................................................",
-  "............................................................",
-  "...............####.............#####.........####..........",
-  "............................................................",
-  "............................................................",
-  "..........####............#####..........####...............",
-  "............................................................",
-  "............................................................",
-  ".....####...........####...........####...........####......",
-  "............................................................",
-  "............................................................",
-  "############################################################",
-  "############################################################",
+// ── 스테이지 8개 ──
+// # 땅·벽   o 금화   g 보석(금화 5개)   c 체리   P 시작   C 체크포인트(깃발)   E 출구(보물상자)   H 물약(목숨 +1)
+// 숲 몹:  p 주머니쥐  f 개구리  e 독수리 (닿으면 다침)  /  R 돌진 주머니쥐  Q 뛰어드는 개구리  W 덮치는 독수리 (예고 뒤 공격)
+// 던전 몹: S 슬라임  V 박쥐  G 유령(못 밟음)  X 거미  O 외눈 거인  M 마법사
+// 보스: Y 두꺼비 왕(중간보스)  K 던전 문지기   /   N 던전 지킴이   U 던전 입구
+// 함정: ^ 가시  T 솟는 가시  A 가고일(화살)  B 굴러다니는 철퇴  F 오르내리는 철퇴  D 떨어지는 철퇴
+// 꾸밈: w 풀  t 횃불(벽에 붙어 배경과 함께 움직임)  I 기둥  b 통
+const STAGES = [
+  { theme: "forest", name: "숲 입구", hint: "몹에 닿으면 다쳐요 · 점프로 피해서 앞으로 가요",
+    map: [
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................................",
+      ".......................................................................W...................W........",
+      "....................................................................................................",
+      "................................e...................................................................",
+      "....................................................................................................",
+      ".........................................................................g..........................",
+      "..............oooo...ooo................coo......ooo..........oooo..........ooo.....................",
+      "..............####.....................####...................####..................................",
+      ".....o.o.o..........................................................................................",
+      "..P.w......wp.....wf.....w..p...w...p..w.....fw......wC.....R......wQ.....w......w.Q..c.R......w.E..",
+      "#####################...#########################...########################...#####################",
+      "#####################...#########################...########################...#####################",
+    ] },
+  { theme: "forest", name: "깊은 숲", hint: "몹 머리 위에 ! 가 뜨면 곧 공격해요",
+    map: [
+      "..............................................................................................................",
+      "..............................................................................................................",
+      "..............................................................................................................",
+      "..............................................................................................................",
+      "..............................................................................................................",
+      "............................................W.....................................................W...........",
+      "...............W.............................................................W................................",
+      "..............................................................................................................",
+      "..............................................................................................................",
+      "..............................................................................................................",
+      "..................................................................o.o.o.o.....................................",
+      "...................oooo............oo.......c......oooo..........................oooo..............g..........",
+      "....................##....................####....................................##..............####........",
+      ".....o.o.o.......................................................#........#...................................",
+      "..P..w......R.w........w...Q...pw..^^...Qw......C.w.......Rw..f..#..wB....#..w.Q......wC..R..c.Q.......pw..E..",
+      "###################....############################....##########################....#########################",
+      "###################....############################....##########################....#########################",
+    ] },
+  { theme: "forest", name: "두꺼비 늪", hint: "늪 끝에 두꺼비 왕이 있어요",
+    map: [
+      "..........................................................................................",
+      "..........................................................................................",
+      "........................................................................................##",
+      "........................................................................................##",
+      "........................................................................................##",
+      "........................................................................................##",
+      "........................W...............................................................##",
+      "........................................................................................##",
+      "........................................................................................##",
+      "..........................................................###...........................##",
+      "........................................................................................##",
+      "..............ooo..........................H............................................##",
+      "..........................................####............................####..........##",
+      ".....o.o.o..............................................................................##",
+      "..P...w...Q...w.....R.w....c..wC......w.......w.......w.......w...Y...w.......w......E..##",
+      "##############...#########################################################################",
+      "##############...#########################################################################",
+    ] },
+  { theme: "forest", name: "던전 앞 숲길", hint: "잠깐 쉬어 가요 · 체리를 챙겨 던전 지킴이에게 가요",
+    map: [
+      "....................................................................................",
+      "....................................................................................",
+      "..................................................................................##",
+      "..................................................................................##",
+      "..................................................................................##",
+      "..................................................................................##",
+      "..................................................................................##",
+      "..................................................................................##",
+      ".................................................g......e.........................##",
+      "................................................####..............................##",
+      "..................................................................................##",
+      ".........................goo..ooo...........oo....................................##",
+      "........................####...............####...................................##",
+      "..............o.o.o.o.o...................................o.o.o.o.................##",
+      "..P...w...c.w.....w.....w.....c.....w.p...w.....w.c...w.....w.......N...U.........##",
+      "##############################...###################################################",
+      "##############################...###################################################",
+    ] },
+  { theme: "dungeon", name: "박쥐 동굴", hint: "박쥐가 흔들리면 곧 날아들어요 · 바닥 가시는 덜컹거린 뒤 솟아요",
+    map: [
+      "################################################################################################",
+      "################################################################################################",
+      "....................#####################...........###########.................................",
+      "............V...................................................V...............V.....V.........",
+      "............................V....V......................V.......................................",
+      "................................................................................................",
+      "................................................................................................",
+      "................................................................................................",
+      "................................................................H...............................",
+      "........t.............t.............t.............t............####...........t.............t...",
+      "..............................G.......................G...........................G.............",
+      ".................ooo......................oo...............oo..........ooo......................",
+      "..........................................##..............####..................................",
+      "......o.o.....................ooo...............................................................",
+      "..P.......S...........S.TT........TT..S........C..S.S..............TT.......C...I...S...S..b.E..",
+      "#################...#####################....##########################...######################",
+      "#################...#####################....##########################...######################",
+    ] },
+  { theme: "dungeon", name: "함정 회랑", hint: "가고일 눈이 빨개지면 화살이 날아와요",
+    map: [
+      "########################################################################################################",
+      "########################################################################################################",
+      "........D...D.........................D....D........X.......................................D...D.......",
+      "..................V.........................................V.................................V.........",
+      "........................................................................................................",
+      "........................................................................................................",
+      "........................................................................................................",
+      "........................................................................................................",
+      ".........................................................H..............................................",
+      "....t...............t...............t...............t...####........t.............F.t...............t...",
+      ".....................................o.o.o.o..............................G.............................",
+      "..........................oooo.....................oo...........................o.o.o...................",
+      "...........................##.....................####...........................###....................",
+      ".......o.o.o.o........A............#..........#................A....................................A...",
+      "..P.............S.....#.....I...C..#....B.....#..S........S....#..C.b.TT.S.TT..........C..S.........#.E.",
+      "##########################....##################################################.....###################",
+      "##########################....##################################################.....###################",
+    ] },
+  { theme: "dungeon", name: "마법사의 탑", hint: "불덩이는 할퀴면 사라져요 · 거인은 빨개진 뒤 돌진해요",
+    map: [
+      "####################################################################################################",
+      "####################################################################################################",
+      "..................X.....................X.................................X.............X...........",
+      "..................................................V.........................V.......................",
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................................",
+      "....................................................................................oHo.............",
+      "........t............t............t............t..........F.t............t..........###.............",
+      "....................................................................................................",
+      ".....................oooo........M......................o.o.o...................M...................",
+      "..............................#####......................###..................#####.................",
+      ".....o.o.o............................o.o.o.o.......................................................",
+      "..P............O............S.......S..........C...I............C..S..O...................S.O....E..",
+      "#####################....###############################.....#######################################",
+      "#####################....###############################.....#######################################",
+    ] },
+  { theme: "dungeon", name: "문지기의 방", hint: "문지기를 쓰러뜨리면 보물상자가 열려요 · 높은 발판으로 돌진을 피해요",
+    map: [
+      "############################################################################",
+      "############################################################################",
+      "................X.........................................................##",
+      "........V.................................................................##",
+      "..........................................................................##",
+      "..........................................................................##",
+      "..........................................................................##",
+      "..........................................................................##",
+      "...............................H..........................................##",
+      "......t.........t.........t...####..t.........t.........t..####...t.......##",
+      "..........................................................................##",
+      "..........................................................................##",
+      "..........................####.................................####.......##",
+      ".....o.o.o................................................................##",
+      "..P........S..TT...C..I.............................K.................E...##",
+      "############################################################################",
+      "############################################################################",
+    ] },
 ];
-const ROWS = MAP.length, COLS = MAP[0].length, WORLD_W = COLS * TILE;
+
+// 지금 스테이지의 맵 (땅·벽만 남긴 것)
+let GRID = [], ROWS = 17, COLS = 60, WORLD_W = 960, theme = "forest";
 function isSolid(c, r) {
-  if (c < 0 || c >= COLS || r >= ROWS) return true; // 맵 양끝과 아래는 벽
-  if (r < 0) return false;
-  return MAP[r][c] === "#";
+  if (c < 0 || c >= COLS) return true;   // 맵 양끝은 벽
+  if (r < 0) return true;                 // 위는 막혀 있음
+  if (r >= ROWS) return false;            // 아래는 뚫려 있음 (구덩이)
+  return GRID[r][c] === "#";
 }
-// 던전 타일셋: 맨 위 칸은 돌 발판(3번째 줄), 그 아래는 벽돌
+const solidAt = (x, y) => isSolid(Math.floor(x / TILE), Math.floor(y / TILE));
 function tileFor(c, r) {
-  if (isSolid(c, r - 1)) return [4 * TILE, 3 * TILE];
+  if (theme === "forest") {
+    if (isSolid(c, r - 1)) return FT.dirt[(c * 7 + r * 3) % FT.dirt.length];
+    if (r >= 15 || isSolid(c, r + 1)) return FT.top;           // 땅 맨 위: 풀
+    const l = isSolid(c - 1, r), rr = isSolid(c + 1, r);       // 떠 있는 발판
+    return !l ? FT.platL : !rr ? FT.platR : FT.platM;
+  }
+  if (isSolid(c, r - 1)) return SPR.brick;
   const l = isSolid(c - 1, r), rr = isSolid(c + 1, r);
-  const col = !l && !rr ? 3 : !l ? 0 : !rr ? 2 : 1;
-  return [col * TILE, 3 * TILE];
+  return [!l && !rr ? 3 : !l ? 0 : !rr ? 2 : 1, 3];
 }
-
-// ── 금화 ──
-// 금화가 놓일 수 있는 자리: 빈 칸 중에서 1~3칸 아래에 밟을 땅이 있는 곳 (시작 자리 근처는 뺌)
-const COIN_COUNT = 5;
-const COIN_SPOTS = [];
-for (let r = 0; r < ROWS; r++)
-  for (let c = 0; c < COLS; c++) {
-    if (isSolid(c, r) || c <= 4) continue;
-    let gap = 0;
-    while (gap < 3 && !isSolid(c, r + gap + 1)) gap++;
-    if (gap < 3) COIN_SPOTS.push([c, r]);
-  }
-let coins = [];
-// 화면에 늘 5개. 하나를 먹으면 다른 자리에 새로 하나 나옴 (다른 금화나 여우 바로 옆은 피함)
-function spawnCoin() {
-  for (let tries = 0; tries < 200; tries++) {
-    const [c, r] = COIN_SPOTS[Math.floor(Math.random() * COIN_SPOTS.length)];
-    const x = c * TILE + 8, y = r * TILE + 8;
-    if (coins.some((k) => Math.abs(k.x - x) < 48 && Math.abs(k.y - y) < 48)) continue;
-    if (Math.abs(x - (player.x + player.w / 2)) < 64 && Math.abs(y - (player.y + player.h / 2)) < 64) continue;
-    coins.push({ x, y });
-    return;
-  }
-}
-function spawnAllCoins() {
-  coins = [];
-  for (let i = 0; i < COIN_COUNT; i++) spawnCoin();
-}
-
-// ── 가시 철퇴 ──
-// roll: 땅 위를 굴러다님 / float: 제자리에서 위아래로 오르내림
-const BALL_R = 11; // 부딪히는 반지름 (그림은 28×28)
-let balls = [];
-const BALL_START = [
-  { type: "roll",  x: 300, min: 200, max: 500, speed: 60 },
-  { type: "roll",  x: 700, min: 600, max: 940, speed: -75 },
-  { type: "float", x: 400, baseY: 165, amp: 45, speed: 1.6 },
-  { type: "float", x: 896, baseY: 165, amp: 45, speed: 2.1 },
-];
-const BALL_EXTRA = [ // 금화 10개마다 하나씩 늘어남
-  { type: "roll",  x: 150, min: 90,  max: 420, speed: 90 },
-  { type: "float", x: 944, baseY: 165, amp: 45, speed: 2.6 },
-  { type: "roll",  x: 820, min: 520, max: 940, speed: -100 },
-];
-function makeBall(b) {
-  return { ...b, y: b.type === "roll" ? 240 - 14 : b.baseY, angle: 0, t: Math.random() * 6 };
-}
-let hazardsOn = true; // 확인 도구가 길 찾기를 할 때만 끔
 
 // ── 여우 ──
-// x, y 는 몸통 상자의 왼쪽 위. 33×32 그림 안에서 몸통은 (8, 12) 부터 16×20
 const player = { x: 40, y: 200, w: 16, h: 20, vx: 0, vy: 0, onGround: false,
                  facing: 1, anim: "idle", animTime: 0 };
-const SPEED = 110, GRAVITY = 900, JUMP = 330, MAX_FALL = 400;
+const SPEED = 115, GRAVITY = 900, JUMP = 330, MAX_FALL = 420;
+const COYOTE = 0.1, BUFFER = 0.13; // 발판에서 막 떨어진 뒤 / 땅에 닿기 직전에 눌러도 점프
+// 대시: Shift 또는 X. 짧게 휙 달려 나가고 그동안은 안 다침. 공중에서는 한 번만
+const DASH_TIME = 0.18, DASH_SPEED = 320, DASH_COOL = 0.6;
+let dashTime = 0, dashCool = 0, dashDir = 1, airDash = true, dashPressed = false, trail = [];
+// 공격: Z 또는 J. 1스테이지 가운데 깃발에서 배움
+const ATK_TIME = 0.14, ATK_COOL = 0.3;
+let attackTime = 0, attackCool = 0, attackPressed = false, swingHits = new Set(), slashT = 0;
+let canAttack = false;
 
 function overlapsSolid(x, y, w, h) {
   for (let r = Math.floor(y / TILE); r <= Math.floor((y + h - 0.001) / TILE); r++)
@@ -190,56 +329,196 @@ function moveY(dy) {
   else player.y = (Math.floor(player.y / TILE) + 1) * TILE;
   player.vy = 0;
 }
+const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+const body = () => ({ x: player.x, y: player.y, w: player.w, h: player.h });
+const pcx = () => player.x + player.w / 2, pcy = () => player.y + player.h / 2;
 
-// ── 목숨과 점수 ──
-const LIVES = 3;
-let lives = LIVES, score = 0, best = 0, hitTimer = 0, invincible = 0, gameOver = false, gameOverAt = 0;
-try { best = Number(localStorage.getItem("fox-best")) || 0; } catch {}
+// ── 게임 상태 ──
+const LIVES = 3, BALL_R = 11;
+let stage = 0, phase = "play", phaseAt = 0;    // phase: play / clear(스테이지 끝) / allclear(모두 끝)
+let lives = LIVES, score = 0, cherries = 0, scoreAtStageStart = 0, cherriesAtStageStart = 0, totalTime = 0, stageTime = 0, kills = 0;
+let hitTimer = 0, invincible = 0, gameOver = false, gameOverAt = 0;
+let coyote = 0, buffer = 0, hitstop = 0, shake = 0, flash = 0, cardTime = 0, notice = null;
+let coins = [], stageCoins = [], items = [], potions = [], spikes = [], pops = [], graves = [], exit = null, startPos = null, respawnAt = null;
+let balls = [], enemies = [], shots = [], gargoyles = [], decor = [], boss = null, keeper = null, gate = null, scene = null;
+let popups = [], bits = [], effects = [];
+const CLEAR_WAIT = 1.2; // 스테이지 클리어 뒤 다음 스테이지까지 (초). 아무 키나 누르면 바로 넘어감
+let clearTimer = 0, clearInfo = null;
+let best = 0;
+try { best = Number(localStorage.getItem("fox-dungeon-best")) || 0; } catch {}
+let hazardsOn = true; // 확인 도구가 길 찾기를 할 때만 끔 (다치지 않고, 구덩이·출구·이야기 장면도 작동 안 함)
 
-function resetGame() {
-  Object.assign(player, { x: 40, y: 200, vx: 0, vy: 0, onGround: false, facing: 1, anim: "idle", animTime: 0 });
-  lives = LIVES; score = 0; hitTimer = 0; invincible = 0; gameOver = false;
-  balls = BALL_START.map(makeBall);
-  spawnAllCoins();
+function ceilingAbove(c, r) { while (r > 0 && !isSolid(c, r - 1)) r--; return r * TILE; }
+function floorBelow(c, r) { while (r < ROWS && !isSolid(c, r)) r++; return r * TILE; }
+
+const ENEMY_BASE = {
+  slime: { w: 12, h: 10, hp: 1 }, bat: { w: 12, h: 10, hp: 1 }, ghost: { w: 12, h: 14, hp: 2 },
+  spider: { w: 12, h: 10, hp: 2 }, ogre: { w: 18, h: 22, hp: 3 }, mage: { w: 12, h: 16, hp: 2 },
+  opossum: { w: 20, h: 14, hp: 1 }, frog: { w: 18, h: 14, hp: 2 }, eagle: { w: 18, h: 16, hp: 1 },
+};
+function makeEnemy(kind, x, y, extra) {
+  const base = ENEMY_BASE[kind];
+  return { kind, x, y, ...base, maxHp: base.hp, dir: -1, state: "idle", timer: 0, cool: 0.5 + Math.random(),
+           t: Math.random() * 6, flash: 0, alive: true, vx: 0, vy: 0, air: false, ...extra };
+}
+const onGroundY = (y, h) => y + TILE - h / 2; // 바닥에 선 몹의 가운데 높이
+
+function makeBoss(type, x, bottom) {
+  const b = type === "frog"
+    ? { type, name: "숲의 두꺼비 왕", w: 44, h: 44, hp: 10, patterns: ["hops", "leap", "eagles"] }
+    : { type, name: "던전 문지기", w: 56, h: 80, hp: 20, patterns: ["charge", "leap", "rocks"] };
+  return { ...b, maxHp: b.hp, x, y: bottom, floorY: bottom, state: "sleep", timer: 0, dir: -1, vx: 0, vy: 0,
+           flash: 0, step: 0, hopsLeft: 0, minX: x - 24 * TILE, maxX: x + 20 * TILE, t: 0 };
+}
+
+function loadStage(i) {
+  stage = i;
+  const S = STAGES[i], map = S.map;
+  theme = S.theme;
+  ROWS = map.length; COLS = map[0].length; WORLD_W = COLS * TILE;
+  GRID = map.map((row) => row.replace(/[^#A]/g, ".").replace(/A/g, "#"));
+  stageCoins = []; items = []; potions = []; spikes = []; pops = []; graves = []; balls = []; enemies = []; shots = [];
+  gargoyles = []; decor = []; popups = []; bits = []; effects = []; boss = null; exit = null; keeper = null; gate = null; scene = null;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const ch = map[r][c], x = c * TILE, y = r * TILE;
+      if (ch === "o") stageCoins.push({ x: x + 8, y: y + 8 });
+      else if (ch === "g") items.push({ kind: "gem", x: x + 8, y: y + 8 });
+      else if (ch === "c") items.push({ kind: "cherry", x: x + 8, y: y + 8 });
+      else if (ch === "P") startPos = { x: x, y: y + TILE - 20 };
+      else if (ch === "E") exit = { x: x, y: y, w: 16, h: 16, locked: false };
+      else if (ch === "H") potions.push({ x: x + 8, y: y + 8, t: 0 });
+      else if (ch === "^") spikes.push({ x: x + 2, y: y + 9, w: 12, h: 7, c, r });
+      else if (ch === "T") pops.push({ x: x + 2, y: y + 8, w: 12, h: 8, c, r, state: "down" });
+      else if (ch === "C") graves.push({ x: x, y: y, w: 16, h: 16, on: false });
+      else if ("tIbw".includes(ch)) decor.push({ kind: ch, x, y, v: (c * 5) % 2 });
+      else if (ch === "A") gargoyles.push({ x, y, dir: isSolid(c - 1, r) ? 1 : -1, state: "idle", timer: 1 + (c % 5) * 0.3 });
+      else if (ch === "S") enemies.push(makeEnemy("slime", x + 8, onGroundY(y, 10)));
+      else if (ch === "V") enemies.push(makeEnemy("bat", x + 8, y + 8, { hx: x + 8, hy: y + 8, state: "hang" }));
+      else if (ch === "G") { const g = makeEnemy("ghost", x + 8, y + 8, { bx: x + 8, by: y + 8 }); placeGhost(g); enemies.push(g); }
+      else if (ch === "X") enemies.push(makeEnemy("spider", x + 8, y + 8, { hy: y + 8, top: ceilingAbove(c, r), landY: floorBelow(c, r) - 5, state: "wait" }));
+      else if (ch === "O") enemies.push(makeEnemy("ogre", x + 8, onGroundY(y, 22), { state: "walk" }));
+      else if (ch === "M") enemies.push(makeEnemy("mage", x + 8, onGroundY(y, 16), { timer: 1.5 }));
+      else if (ch === "p" || ch === "R") enemies.push(makeEnemy("opossum", x + 8, onGroundY(y, 14), { angry: ch === "R", state: "walk" }));
+      else if (ch === "f" || ch === "Q") enemies.push(makeEnemy("frog", x + 8, onGroundY(y, 14), { angry: ch === "Q", timer: 1 + Math.random() }));
+      else if (ch === "e" || ch === "W") enemies.push(makeEnemy("eagle", x + 8, y + 8, { angry: ch === "W", hx: x + 8, hy: y + 8, state: "hover" }));
+      else if (ch === "Y") boss = makeBoss("frog", x + 8, y + 16);
+      else if (ch === "K") boss = makeBoss("ogre", x + 8, y + 16);
+      else if (ch === "N") keeper = { x: x + 8, y: y + 16, gesture: 0 };
+      else if (ch === "U") gate = { x, bottom: y + 16, open: 0 };
+      else if (ch === "B") balls.push({ type: "roll", x: x + 8, y: y + 16 - 14, speed: 55, angle: 0 });
+      else if (ch === "F") balls.push({ type: "float", x: x + 8, y: y + 8, baseY: y + 8, amp: 40, speed: 1.8, t: Math.random() * 6 });
+      else if (ch === "D") balls.push({ type: "drop", x: x + 8, y: y + 8, homeY: y + 8, top: ceilingAbove(c, r), landY: floorBelow(c, r) - 14, state: "wait", timer: 0, vy: 0 });
+    }
+  for (const e of enemies) if (e.kind === "eagle") placeEagle(e);
+  if (gate) exit = { x: gate.x + 2 * TILE, y: gate.bottom - 3 * TILE, w: 2 * TILE, h: 3 * TILE, locked: true, gate: true };
+  if (boss && exit) { exit.locked = true; boss.maxX = exit.x - 8; }
+  coins = stageCoins.map((k) => ({ ...k }));
+  respawnAt = { ...startPos };
+  placePlayer(respawnAt);
+  invincible = 1.2; // 시작하자마자 맞지 않게
+  hitTimer = 0; hitstop = 0; shake = 0; stageTime = 0; cardTime = 2.8; notice = null;
+  phase = "play";
+  scoreAtStageStart = score; cherriesAtStageStart = cherries;
+  canAttack = i > 0; // 1스테이지는 처음엔 못 때리고, 가운데 깃발에서 배움
+  buildBackground();
+}
+function placePlayer(p) {
+  Object.assign(player, { x: p.x, y: p.y, vx: 0, vy: 0, onGround: false, facing: 1, anim: "idle", animTime: 0 });
+  coyote = 0; buffer = 0;
+  dashTime = 0; dashCool = 0; airDash = true; dashPressed = false; trail = [];
+  attackTime = 0; attackCool = 0; attackPressed = false; slashT = 0;
+}
+function newGame() {
+  lives = LIVES; score = 0; cherries = 0; totalTime = 0; kills = 0; gameOver = false;
+  loadStage(0);
+}
+function restartStage() { // 게임 끝 뒤에는 그 스테이지 처음부터
+  lives = LIVES; score = scoreAtStageStart; cherries = cherriesAtStageStart; gameOver = false;
+  loadStage(stage);
 }
 
 // ── 키 ──
 const keys = {};
-let jumpPressed = false, started = false;
+let jumpPressed = false, started = false, loaded = false;
 addEventListener("keydown", (e) => {
   if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(e.code)) e.preventDefault();
   if (!loaded) return;
-  if (gameOver && performance.now() - gameOverAt < 800) return; // 죽는 순간 누르던 키로 바로 다시 시작하지 않게
-  if (!started || (gameOver && !e.repeat)) { // 브라우저는 키를 한 번 눌러야 소리를 내 줌
-    if (gameOver) resetGame();
+  const now = performance.now();
+  if (gameOver && now - gameOverAt < 800) return;          // 죽는 순간 누르던 키로 바로 넘어가지 않게
+  if (phase === "allclear" && now - phaseAt < 700) return;
+  if (phase === "clear" && now - phaseAt < 200) return;
+  if (!started || (!e.repeat && (gameOver || phase !== "play"))) {
+    if (gameOver) restartStage();
+    else if (phase === "clear") loadStage(stage + 1);
+    else if (phase === "allclear") newGame();
     started = true;
+    for (const k in keys) keys[k] = false;
     msg.classList.add("hide");
     if (!muted) sounds.bgm.play().catch(() => {});
     return;
   }
   keys[e.code] = true;
-  if (e.code === "Space" && !e.repeat) jumpPressed = true;
+  if ((e.code === "Space" || e.code === "ArrowUp") && !e.repeat) jumpPressed = true;
+  if ((e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyX") && !e.repeat) dashPressed = true;
+  if ((e.code === "KeyZ" || e.code === "KeyJ") && !e.repeat) attackPressed = true;
   if (e.code === "KeyM") {
     muted = !muted;
     sounds.bgm.muted = muted;
     if (!muted) sounds.bgm.play().catch(() => {});
   }
 });
-addEventListener("keyup", (e) => { keys[e.code] = false; });
+addEventListener("keyup", (e) => {
+  keys[e.code] = false;
+  if ((e.code === "Space" || e.code === "ArrowUp") && player.vy < 0 && !scene) player.vy *= 0.45; // 빨리 떼면 낮게
+});
 
-function hurt(ball) {
+// ── 효과 ──
+function popup(x, y, text, color) { popups.push({ x, y, text, color, t: 0 }); }
+function burst(x, y, color, n, speed = 70) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = speed * (0.5 + Math.random());
+    bits.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, t: 0, color });
+  }
+}
+function puff(x, y) { effects.push({ kind: "puff", x, y, t: 0 }); }
+
+function hurt(fromX) {
   lives--;
   hitTimer = 0.4;
   invincible = 1.5;
-  const away = player.x + player.w / 2 < ball.x ? -1 : 1; // 철퇴 반대쪽으로 튕겨 나감
+  dashTime = 0; attackTime = 0;
+  hitstop = 0.07; shake = 0.25; flash = 0.12;
+  const away = pcx() < fromX ? -1 : 1; // 부딪힌 것 반대쪽으로 튕겨 나감
   player.vx = away * 140;
   player.vy = -220;
 }
+function fellInPit() {
+  lives--;
+  shake = 0.2; flash = 0.12;
+  if (lives <= 0) { lives = 0; endGame(); return; }
+  placePlayer(respawnAt);
+  invincible = 1.5;
+}
 
+// ── 한 번 움직이기 (1/60초쯤) ──
 function update(dt) {
-  if (gameOver) return;
+  if (phase === "clear") { // 클리어 글자를 잠깐 보여 주고 다음 스테이지로
+    clearTimer -= dt;
+    if (clearTimer <= 0) loadStage(stage + 1);
+    return;
+  }
+  if (gameOver || phase !== "play") return;
+  if (hitstop > 0) { hitstop -= dt; return; } // 맞거나 때린 순간 아주 잠깐 멈춤 (타격감)
+  stageTime += dt;
+  if (cardTime > 0) cardTime -= dt;
+  if (notice) { notice.t -= dt; if (notice.t <= 0) notice = null; }
+  if (shake > 0) shake -= dt;
+  if (flash > 0) flash -= dt;
 
-  // 맞은 직후 잠깐은 조작이 안 되고 튕겨 나감
+  // 이야기 장면(던전 지킴이) 중에는 조작이 안 됨
+  if (scene) { jumpPressed = dashPressed = attackPressed = false; for (const k in keys) keys[k] = false; }
+
   let dir = 0;
   if (hitTimer > 0) {
     hitTimer -= dt;
@@ -247,155 +526,973 @@ function update(dt) {
   } else {
     dir = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
     player.vx = dir * SPEED;
-    if (dir) player.facing = dir;
-    if (jumpPressed && player.onGround) { player.vy = -JUMP; playSfx("jump"); }
+    if (dir && attackTime <= 0) player.facing = dir;
   }
+  coyote = player.onGround ? COYOTE : coyote - dt;
+  buffer = jumpPressed ? BUFFER : buffer - dt;
   jumpPressed = false;
+  if (hitTimer <= 0 && buffer > 0 && coyote > 0) {
+    player.vy = -JUMP; buffer = 0; coyote = 0;
+    dashTime = 0;
+    playSfx("jump");
+  }
   if (invincible > 0) invincible -= dt;
 
-  player.vy = Math.min(player.vy + GRAVITY * dt, MAX_FALL);
+  // 대시
+  if (player.onGround) airDash = true;
+  if (dashCool > 0) dashCool -= dt;
+  if (dashPressed && hitTimer <= 0 && dashCool <= 0 && dashTime <= 0 && (player.onGround || airDash)) {
+    dashTime = DASH_TIME; dashCool = DASH_COOL;
+    dashDir = dir || player.facing; player.facing = dashDir;
+    if (!player.onGround) airDash = false;
+    playSfx("jump", 0.25, 1.6);
+    burst(pcx(), player.y + player.h, "#c9b8ff", 5);
+  }
+  dashPressed = false;
+  if (dashTime > 0) {
+    dashTime -= dt;
+    player.vx = dashDir * DASH_SPEED;
+    player.vy = 0;
+    trail.push({ x: player.x, y: player.y, facing: player.facing, t: 0 });
+  }
+  for (const g of trail) g.t += dt;
+  trail = trail.filter((g) => g.t < 0.2);
+
+  // 공격
+  if (attackCool > 0) attackCool -= dt;
+  if (attackTime > 0) attackTime -= dt;
+  if (slashT > 0) slashT -= dt;
+  if (attackPressed && canAttack && hitTimer <= 0 && attackCool <= 0) {
+    attackTime = ATK_TIME; attackCool = ATK_COOL; swingHits = new Set(); slashT = SHEETS.slash.frames / SHEETS.slash.fps;
+    playSfx("jump", 0.2, 2.2);
+  }
+  attackPressed = false;
+
+  if (dashTime <= 0) player.vy = Math.min(player.vy + GRAVITY * dt, MAX_FALL);
+  const prevBottom = player.y + player.h;
   moveX(player.vx * dt);
   moveY(player.vy * dt);
 
-  // 가시 철퇴 움직이기
-  for (const b of balls) {
-    b.t += dt;
-    if (b.type === "roll") {
-      b.x += b.speed * dt;
-      if (b.x < b.min || b.x > b.max) { b.x = Math.max(b.min, Math.min(b.max, b.x)); b.speed = -b.speed; }
-      b.angle += (b.speed * dt) / 14; // 굴러간 거리만큼 돌림
-    } else {
-      b.y = b.baseY + Math.sin(b.t * b.speed) * b.amp;
-    }
+  if (player.y > ROWS * TILE + 24) { // 구덩이에 빠짐
+    if (hazardsOn) { fellInPit(); return; }
   }
 
-  // 부딪혔는지 (몸통 상자에서 철퇴 중심까지 가장 가까운 거리)
-  if (hazardsOn && invincible <= 0) {
-    for (const b of balls) {
-      const nx = Math.max(player.x, Math.min(b.x, player.x + player.w));
-      const ny = Math.max(player.y, Math.min(b.y, player.y + player.h));
-      if ((nx - b.x) ** 2 + (ny - b.y) ** 2 < BALL_R * BALL_R) { hurt(b); break; }
-    }
-  }
+  updateBalls(dt);
+  updateTraps(dt);
+  updateEnemies(dt);
+  updateBoss(dt);
+  updateShots(dt);
+  updateScene(dt);
+  if (attackTime > 0) doAttack();
+  contacts(prevBottom);
 
-  // 어떤 애니메이션을 보여 줄지 — 철퇴에 맞은 그 순간부터 피격 그림이 나오게 부딪힘 확인 뒤에 고름
-  // (점프 시트 2장: 올라갈 때 0번, 내려올 때 1번)
   let anim;
   if (hitTimer > 0) anim = "hit";
+  else if (dashTime > 0) anim = "run";
   else if (player.onGround) anim = dir ? "run" : "idle";
   else anim = player.vy < 0 ? "jump" : "fall";
   if (anim !== player.anim) { player.anim = anim; player.animTime = 0; }
   player.animTime += dt;
 
-  // 금화 먹기
-  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
-  let eaten = 0;
+  // 금화·보석·체리·물약
+  const cx = pcx(), cy = pcy();
+  const near = (k, pad) => Math.abs(k.x - cx) < player.w / 2 + pad && Math.abs(k.y - cy) < player.h / 2 + pad;
   coins = coins.filter((k) => {
-    const hit = Math.abs(k.x - cx) < player.w / 2 + 5 && Math.abs(k.y - cy) < player.h / 2 + 5;
-    if (hit) eaten++;
-    return !hit;
+    if (!near(k, 5)) return true;
+    score++; playSfx("coin"); burst(k.x, k.y, "#ffd54a", 6); popup(k.x, k.y - 6, "+1", "#ffd54a");
+    return false;
   });
-  for (let i = 0; i < eaten; i++) {
-    score++;
-    playSfx("coin");
-    spawnCoin();
-    const extra = Math.floor(score / 10) - 1; // 10개, 20개, 30개째에 철퇴가 하나씩 늘어남
-    if (score % 10 === 0 && BALL_EXTRA[extra]) balls.push(makeBall(BALL_EXTRA[extra]));
+  items = items.filter((k) => {
+    if (!near(k, 7)) return true;
+    if (k.kind === "gem") { score += 5; playSfx("coin", 0.7, 1.3); burst(k.x, k.y, "#e58cff", 10); popup(k.x, k.y - 8, "+5", "#e58cff"); }
+    else { cherries++; playSfx("coin", 0.7, 0.9); burst(k.x, k.y, "#ff5470", 8); popup(k.x, k.y - 8, "체리 +1", "#ff8fa3"); }
+    return false;
+  });
+  for (const p of potions) p.t += dt;
+  potions = potions.filter((p) => {
+    if (!near(p, 6)) return true;
+    playSfx("coin", 0.8, 0.8); burst(p.x, p.y, "#ff5470", 8);
+    if (lives < LIVES) { lives++; popup(p.x, p.y - 8, "목숨 +1", "#ff8fa3"); } else popup(p.x, p.y - 8, "목숨 가득!", "#ff8fa3");
+    return false;
+  });
+  // 체크포인트 (깃발). 1스테이지 가운데 깃발에서 할퀴기를 배움
+  for (const g of graves)
+    if (!g.on && hits(body(), g)) {
+      g.on = true;
+      respawnAt = { x: g.x, y: g.y + TILE - 20 };
+      popup(g.x + 8, g.y - 6, "체크포인트!", "#7ee8ff");
+      burst(g.x + 8, g.y + 4, "#ffb347", 8);
+      if (!canAttack) { canAttack = true; notice = { text: "할퀴기를 배웠어요!", sub: "이제 Z 로 몹을 할퀼 수 있어요", t: 3 }; }
+    }
+  // 출구
+  if (hazardsOn && exit && !exit.locked && hits(body(), exit)) clearStage();
+
+  for (const p of popups) { p.t += dt; p.y -= 22 * dt; }
+  popups = popups.filter((p) => p.t < 0.8);
+  for (const b of bits) { b.t += dt; b.vy += 300 * dt; b.x += b.vx * dt; b.y += b.vy * dt; }
+  bits = bits.filter((b) => b.t < 0.5);
+  for (const e of effects) e.t += dt;
+  effects = effects.filter((e) => e.t < SHEETS.puff.frames / SHEETS.puff.fps);
+}
+
+// ── 공격 ──
+function attackBox() {
+  return player.facing > 0 ? { x: player.x + player.w - 2, y: player.y - 4, w: 26, h: 26 }
+                           : { x: player.x - 24, y: player.y - 4, w: 26, h: 26 };
+}
+function doAttack() {
+  const box = attackBox();
+  for (const e of enemies)
+    if (e.alive && !swingHits.has(e) && hits(box, enemyBox(e))) { swingHits.add(e); hitEnemy(e, player.facing); }
+  if (boss && boss.state !== "dead" && !swingHits.has(boss) && hits(box, bossBox())) { swingHits.add(boss); hitBoss(); }
+  shots = shots.filter((s) => {
+    if ((s.kind === "fire" || s.kind === "arrow") && hits(box, shotBox(s))) { burst(s.x, s.y, s.kind === "fire" ? "#ff9a3c" : "#d8d0c0", 6); return false; }
+    return true;
+  });
+}
+function hitEnemy(e, fromDir) {
+  e.hp--;
+  e.flash = 0.15;
+  hitstop = Math.max(hitstop, 0.05); shake = Math.max(shake, 0.08);
+  playSfx("coin", 0.35, 0.5);
+  burst(e.x, e.y, "#ffffff", 5);
+  const flying = e.kind === "ghost" || e.kind === "spider" || e.kind === "bat" || e.kind === "eagle" || e.air;
+  if (fromDir && !flying) { const nx = e.x + fromDir * 8; if (!solidAt(nx + fromDir * e.w / 2, e.y)) e.x = nx; }
+  if ((e.kind === "ogre" || e.kind === "opossum") && (e.state === "windup" || e.state === "warn")) { e.state = "rest"; e.timer = 0.6; }
+  if (e.hp <= 0) {
+    e.alive = false; kills++;
+    puff(e.x, e.y);
+    if (!solidAt(e.x, e.y)) coins.push({ x: e.x, y: e.y }); // 무찌르면 금화를 떨어뜨림
   }
+}
+
+// ── 부딪힘 (위에서 밟으면 때린 것과 같음. 유령은 못 밟음) ──
+function enemyBox(e) { return { x: e.x - e.w / 2, y: e.y - e.h / 2, w: e.w, h: e.h }; }
+function bossBox() { return { x: boss.x - boss.w / 2, y: boss.y - boss.h, w: boss.w, h: boss.h }; }
+function shotBox(s) { return { x: s.x - s.w / 2, y: s.y - s.h / 2, w: s.w, h: s.h }; }
+function contacts(prevBottom) {
+  if (!hazardsOn || hitTimer > 0) return;
+  const stomping = player.vy > 0 && dashTime <= 0;
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const box = enemyBox(e);
+    if (!hits(body(), box)) continue;
+    if (stomping && e.kind !== "ghost" && prevBottom <= box.y + 5) {
+      hitEnemy(e, 0);
+      player.vy = -250; coyote = 0; airDash = true;
+      playSfx("jump", 0.4);
+      return;
+    }
+    if (invincible <= 0 && dashTime <= 0) { hurt(e.x); return; }
+  }
+  if (boss && boss.state !== "dead" && hits(body(), bossBox())) {
+    if (stomping && prevBottom <= bossBox().y + 6) { hitBoss(); player.vy = -320; airDash = true; return; }
+    if (invincible <= 0 && dashTime <= 0) { hurt(boss.x); return; }
+  }
+  if (invincible > 0 || dashTime > 0) return;
+  for (const b of balls) {
+    const nx = Math.max(player.x, Math.min(b.x, player.x + player.w));
+    const ny = Math.max(player.y, Math.min(b.y, player.y + player.h));
+    if ((nx - b.x) ** 2 + (ny - b.y) ** 2 < BALL_R * BALL_R) { hurt(b.x); return; }
+  }
+  for (const s of spikes) if (hits(body(), s)) { hurt(s.x + 6); return; }
+  for (const p of pops) if (p.state === "up" && hits(body(), p)) { hurt(p.x + 6); return; }
+  for (const s of shots) if (hits(body(), shotBox(s))) { hurt(s.x); if (s.kind !== "wave") s.life = 0; return; }
+}
+
+// ── 철퇴 ──
+function updateBalls(dt) {
+  for (const b of balls) {
+    if (b.type === "roll") {
+      const ahead = Math.floor((b.x + Math.sign(b.speed) * 14) / TILE), row = Math.floor(b.y / TILE);
+      if (isSolid(ahead, row) || !isSolid(ahead, row + 1)) b.speed = -b.speed;
+      b.x += b.speed * dt;
+      b.angle += (b.speed * dt) / 14;
+    } else if (b.type === "float") {
+      b.t += dt;
+      b.y = b.baseY + Math.sin(b.t * b.speed) * b.amp;
+    } else { // drop·rock: 기다림 → 예고 → 떨어짐 → 쉼 → 올라감 (rock 은 사라짐)
+      b.timer -= dt;
+      const nearP = Math.abs(pcx() - b.x) < 44 && player.y > b.y;
+      if (b.state === "wait" && nearP && b.timer <= 0) { b.state = "warn"; b.timer = 0.7; }
+      else if (b.state === "warn" && b.timer <= 0) { b.state = "fall"; b.vy = 0; }
+      else if (b.state === "fall") {
+        b.vy = Math.min(b.vy + 900 * dt, 500);
+        b.y += b.vy * dt;
+        if (b.y >= b.landY) {
+          b.y = b.landY; b.state = "rest"; b.timer = b.type === "rock" ? 0.25 : 0.8;
+          burst(b.x, b.y + 12, "#9aa0b8", 6);
+          if (Math.abs(player.x - b.x) < 160) shake = Math.max(shake, 0.12);
+        }
+      } else if (b.state === "rest" && b.timer <= 0) { b.state = "rise"; if (b.type === "rock") b.gone = true; }
+      else if (b.state === "rise") {
+        b.y -= 70 * dt;
+        if (b.y <= b.homeY) { b.y = b.homeY; b.state = "wait"; b.timer = 0.6; }
+      }
+    }
+  }
+  balls = balls.filter((b) => !b.gone);
+}
+
+function updateTraps(dt) {
+  for (const p of pops) {
+    const t = (stageTime + p.c * 0.13) % 3;
+    p.state = t < 1.6 ? "down" : t < 2.2 ? "warn" : "up";
+  }
+  for (const g of gargoyles) {
+    g.timer -= dt;
+    if (g.state === "idle" && g.timer <= 0 && Math.abs(pcx() - g.x) < 320) { g.state = "warn"; g.timer = 0.6; }
+    else if (g.state === "warn" && g.timer <= 0) {
+      shots.push({ kind: "arrow", x: g.x + 8 + g.dir * 10, y: g.y + 13, vx: g.dir * 170, vy: 0, w: 10, h: 3, life: 3 });
+      g.state = "idle"; g.timer = 2.2;
+    }
+  }
+}
+
+// ── 몹 ──
+function groundAhead(e, dir) {
+  const ahead = Math.floor((e.x + dir * (e.w / 2 + 2)) / TILE), row = Math.floor((e.y + e.h / 2 - 1) / TILE);
+  if (isSolid(ahead, row) || !isSolid(ahead, row + 1)) return false;
+  return !spikes.some((s) => s.c === ahead && s.r === row) && !pops.some((s) => s.c === ahead && s.r === row);
+}
+function placeGhost(e) {
+  e.x = e.bx + Math.sin(e.t * 0.9) * 40;
+  e.y = e.by + Math.sin(e.t * 1.7) * 10;
+}
+function placeEagle(e) { // 독수리: 제자리 근처를 오가며 날갯짓
+  e.x = e.hx + Math.sin(e.t * 0.8) * (e.angry ? 30 : 50);
+  e.y = e.hy + Math.sin(e.t * 2) * 6;
+}
+function airMove(e, dt) { // 뛰는 몹(개구리): 떨어지다가 땅에 닿으면 섬
+  e.vy += GRAVITY * dt;
+  if (!solidAt(e.x + Math.sign(e.vx) * (e.w / 2 + 1), e.y)) e.x += e.vx * dt;
+  e.y += e.vy * dt;
+  const foot = e.y + e.h / 2;
+  if (e.vy > 0 && solidAt(e.x, foot)) { e.y = Math.floor(foot / TILE) * TILE - e.h / 2; e.vy = 0; e.vx = 0; e.air = false; return true; }
+  if (e.y > ROWS * TILE + 40) e.alive = false;
+  return false;
+}
+function updateEnemies(dt) {
+  const px = pcx(), py = pcy();
+  for (const e of enemies) {
+    e.t += dt;
+    if (e.flash > 0) e.flash -= dt;
+    if (!e.alive) continue;
+    if (e.cool > 0) e.cool -= dt;
+    e.timer -= dt;
+    const close = (dx, dy) => Math.abs(px - e.x) < dx && Math.abs(py - e.y) < dy;
+    switch (e.kind) {
+      case "slime":
+        if (!groundAhead(e, e.dir)) e.dir = -e.dir;
+        e.x += e.dir * 26 * dt;
+        break;
+      case "ghost": placeGhost(e); break;
+      case "opossum": // 걷기. 화난 주머니쥐는 몸을 떤 뒤(예고) 돌진
+        if (e.state === "walk") {
+          if (!groundAhead(e, e.dir)) e.dir = -e.dir;
+          e.x += e.dir * 30 * dt;
+          if (e.angry && e.cool <= 0 && close(110, 24)) { e.state = "warn"; e.timer = 0.55; e.dir = Math.sign(px - e.x) || 1; }
+        } else if (e.state === "warn" && e.timer <= 0) { e.state = "rush"; e.timer = 0.7; }
+        else if (e.state === "rush") {
+          if (!groundAhead(e, e.dir) || e.timer <= 0) { e.state = "rest"; e.timer = 0.6; }
+          else e.x += e.dir * 155 * dt;
+        } else if (e.state === "rest" && e.timer <= 0) { e.state = "walk"; e.cool = 1.5; }
+        break;
+      case "frog": // 개구리: 제자리에서 폴짝. 화난 개구리는 웅크린 뒤(예고) 여우 쪽으로 뛰어듦
+        if (e.air) { airMove(e, dt); break; }
+        if (e.state === "idle" && e.timer <= 0) {
+          if (e.angry && e.cool <= 0 && close(130, 60)) { e.state = "warn"; e.timer = 0.5; e.dir = Math.sign(px - e.x) || 1; }
+          else if (!e.angry || e.timer < -1) { e.vy = -190; e.vx = 0; e.air = true; e.timer = 1.6 + Math.random(); }
+        } else if (e.state === "warn" && e.timer <= 0) {
+          e.vx = Math.max(-140, Math.min(140, (px - e.x) / 0.7)); e.vy = -300; e.air = true;
+          e.state = "idle"; e.timer = 1.4; e.cool = 1.4;
+        }
+        break;
+      case "eagle": // 독수리: 오가며 날기. 화난 독수리는 날개를 떤 뒤(예고) 덮침
+        if (e.state === "hover") {
+          placeEagle(e);
+          if (e.angry && e.cool <= 0 && Math.abs(px - e.x) < 120 && py > e.y) { e.state = "warn"; e.timer = 0.55; }
+        } else if (e.state === "warn" && e.timer <= 0) {
+          const dx = px - e.x, dy = py - e.y, d = Math.hypot(dx, dy) || 1;
+          e.vx = dx / d * 170; e.vy = dy / d * 170; e.state = "dive"; e.timer = 1.1;
+        } else if (e.state === "dive") {
+          e.x += e.vx * dt; e.y += e.vy * dt;
+          if (e.timer <= 0 || solidAt(e.x, e.y + e.vy * 0.06)) e.state = "back";
+        } else if (e.state === "back") {
+          const tx = e.hx + Math.sin(e.t * 0.8) * 30, ty = e.hy + Math.sin(e.t * 2) * 6;
+          const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy);
+          if (d < 3) { e.state = "hover"; e.cool = 1.6; } else { e.x += dx / d * 90 * dt; e.y += dy / d * 90 * dt; }
+        }
+        break;
+      case "bat":
+        if (e.state === "hang" && e.cool <= 0 && Math.abs(px - e.x) < 100 && py > e.y) { e.state = "warn"; e.timer = 0.5; }
+        else if (e.state === "warn" && e.timer <= 0) {
+          const dx = px - e.x, dy = py - e.y, d = Math.hypot(dx, dy) || 1;
+          e.vx = dx / d * 165; e.vy = dy / d * 165; e.state = "dive"; e.timer = 1.1;
+        } else if (e.state === "dive") {
+          e.x += e.vx * dt; e.y += e.vy * dt;
+          if (e.timer <= 0 || solidAt(e.x, e.y + e.vy * 0.05)) e.state = "back";
+        } else if (e.state === "back") {
+          const dx = e.hx - e.x, dy = e.hy - e.y, d = Math.hypot(dx, dy);
+          if (d < 2) { e.x = e.hx; e.y = e.hy; e.state = "hang"; e.cool = 1.2; }
+          else { e.x += dx / d * 80 * dt; e.y += dy / d * 80 * dt; }
+        }
+        break;
+      case "spider":
+        if (e.state === "wait" && e.cool <= 0 && Math.abs(px - e.x) < 22 && py > e.y) { e.state = "warn"; e.timer = 0.45; }
+        else if (e.state === "warn" && e.timer <= 0) { e.state = "drop"; e.vy = 0; }
+        else if (e.state === "drop") {
+          e.vy = Math.min(e.vy + 900 * dt, 450); e.y += e.vy * dt;
+          if (e.y >= e.landY) { e.y = e.landY; e.state = "rest"; e.timer = 1.0; }
+        } else if (e.state === "rest" && e.timer <= 0) e.state = "climb";
+        else if (e.state === "climb") {
+          e.y -= 55 * dt;
+          if (e.y <= e.hy) { e.y = e.hy; e.state = "wait"; e.cool = 0.8; }
+        }
+        break;
+      case "ogre":
+        if (e.state === "walk") {
+          if (!groundAhead(e, e.dir)) e.dir = -e.dir;
+          e.x += e.dir * 22 * dt;
+          if (e.cool <= 0 && close(110, 30)) { e.state = "windup"; e.timer = 0.65; e.dir = Math.sign(px - e.x) || 1; }
+        } else if (e.state === "windup" && e.timer <= 0) { e.state = "charge"; e.timer = 0.8; }
+        else if (e.state === "charge") {
+          if (!groundAhead(e, e.dir) || e.timer <= 0) { e.state = "rest"; e.timer = 0.9; }
+          else e.x += e.dir * 170 * dt;
+        } else if (e.state === "rest" && e.timer <= 0) { e.state = "walk"; e.cool = 1.2; }
+        break;
+      case "mage":
+        e.dir = px < e.x ? -1 : 1;
+        if (e.state === "idle" && e.timer <= 0 && close(230, 130)) { e.state = "cast"; e.timer = 0.8; }
+        else if (e.state === "cast" && e.timer <= 0) {
+          const sx = e.x + e.dir * 8, sy = e.y - 4, dx = px - sx, dy = py - sy, d = Math.hypot(dx, dy) || 1;
+          shots.push({ kind: "fire", x: sx, y: sy, vx: dx / d * 110, vy: dy / d * 110, w: 9, h: 9, life: 4 });
+          e.state = "idle"; e.timer = 2.2;
+        }
+        break;
+    }
+  }
+  enemies = enemies.filter((e) => e.alive);
+}
+
+function updateShots(dt) {
+  for (const s of shots) {
+    s.life -= dt;
+    s.age = (s.age || 0) + dt;
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    if (s.kind === "wave") { if (solidAt(s.x + Math.sign(s.vx) * 6, s.y)) s.life = 0; }
+    else if (s.age > 0.35 && solidAt(s.x, s.y)) { s.life = 0; burst(s.x, s.y, s.kind === "fire" ? "#ff9a3c" : "#d8d0c0", 4); }
+  }
+  shots = shots.filter((s) => s.life > 0);
+}
+
+// ── 보스 (두꺼비 왕 / 던전 문지기). 공격마다 먼저 예고하고, 체력이 반 남으면 빨라짐 ──
+function hitBoss() {
+  boss.hp--;
+  boss.flash = 0.15;
+  hitstop = Math.max(hitstop, 0.06); shake = Math.max(shake, 0.12);
+  playSfx("coin", 0.4, 0.4);
+  burst(boss.x, boss.y - boss.h / 2, "#ffffff", 8, 90);
+  if (boss.hp <= 0) { boss.state = "dead"; boss.timer = 1.4; kills++; }
+}
+function bossLand(b) { // 내려찍기: 양쪽으로 충격파
+  shake = 0.35;
+  burst(b.x, b.y - 4, "#9aa0b8", 14, 100);
+  for (const d of [-1, 1]) shots.push({ kind: "wave", x: b.x + d * (b.w / 2 + 2), y: b.floorY - 6, vx: d * 150, vy: 0, w: 12, h: 12, life: 2.2 });
+}
+function updateBoss(dt) {
+  const b = boss;
+  if (!b) return;
+  b.t += dt;
+  if (b.flash > 0) b.flash -= dt;
+  b.timer -= dt;
+  const px = pcx(), fast = b.hp <= b.maxHp / 2 ? 1.3 : 1;
+  const blocked = (dir) => solidAt(b.x + dir * (b.w / 2 + 2), b.y - 8) || b.x + dir * 4 < b.minX || b.x + dir * 4 > b.maxX;
+  const jumpTo = (tx, vy, time) => {
+    tx = Math.max(b.minX, Math.min(b.maxX, tx));
+    b.vx = Math.max(-260, Math.min(260, (tx - b.x) / time)); b.vy = vy; b.state = "air";
+  };
+  switch (b.state) {
+    case "sleep":
+      if (px > b.x - 250 && hazardsOn) { b.state = "intro"; b.timer = 1.2; shake = 0.4; playSfx("jump", 0.6, 0.5); }
+      break;
+    case "intro": if (b.timer <= 0) { b.state = "idle"; b.timer = 0.8; } break;
+    case "idle":
+      b.dir = px < b.x ? -1 : 1;
+      if (b.timer <= 0) {
+        const p = b.patterns[b.step++ % b.patterns.length];
+        if (p === "charge") { b.state = "windup"; b.timer = 0.75 / fast; }
+        else if (p === "leap") { b.state = "crouch"; b.next = "slam"; b.timer = 0.6 / fast; }
+        else if (p === "hops") { b.hopsLeft = 3; b.state = "crouch"; b.next = "hop"; b.timer = 0.45 / fast; }
+        else { b.state = "roar"; b.timer = 0.7; b.next = p; }
+      }
+      break;
+    case "windup": if (b.timer <= 0) { b.state = "charge"; b.timer = 2.5; } break;
+    case "charge":
+      if (blocked(b.dir) || b.timer <= 0) { b.state = "stun"; b.timer = 1.4; shake = 0.3; burst(b.x + b.dir * b.w / 2, b.y - 10, "#9aa0b8", 10); }
+      else b.x += b.dir * 200 * fast * dt;
+      break;
+    case "stun": if (b.timer <= 0) { b.state = "idle"; b.timer = 0.6; } break;
+    case "crouch":
+      if (b.timer <= 0) {
+        b.dir = px < b.x ? -1 : 1;
+        if (b.next === "hop") jumpTo(b.x + Math.max(-110, Math.min(110, px - b.x)), -320, 0.7);
+        else jumpTo(px, -420, 0.9);
+      }
+      break;
+    case "air":
+      b.vy += GRAVITY * dt;
+      if (!blocked(Math.sign(b.vx))) b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (b.vy > 0 && b.y >= b.floorY) {
+        b.y = b.floorY;
+        if (b.next === "hop") {
+          shake = 0.12;
+          if (--b.hopsLeft > 0) { b.state = "crouch"; b.timer = 0.4 / fast; } else { b.state = "idle"; b.timer = 1.0; }
+        } else { bossLand(b); b.state = "idle"; b.timer = 1.1; }
+      }
+      break;
+    case "roar":
+      if (b.timer <= 0) {
+        if (b.next === "rocks") { // 여우 머리 위와 양옆에 바위 3개 (땅에 빨간 표시가 먼저)
+          for (const off of [0, -56, 56]) {
+            const x = Math.max(b.minX, Math.min(b.maxX + 40, px + off)), c = Math.floor(x / TILE);
+            balls.push({ type: "rock", x, y: 40, homeY: 40, top: 2 * TILE, landY: floorBelow(c, 3) - 14, state: "warn", timer: 0.8, vy: 0 });
+          }
+          b.timer = 1.7;
+        } else { // 독수리 두 마리를 부름 (독수리도 덮치기 전에 예고함)
+          if (enemies.filter((e) => e.kind === "eagle").length < 3)
+            for (const d of [-1, 1]) {
+              const hx = Math.max(b.minX, Math.min(b.maxX, px + d * 110));
+              enemies.push(makeEnemy("eagle", hx, -20, { angry: true, hx, hy: 70, state: "back", cool: 0.8 }));
+            }
+          b.timer = 2.2;
+        }
+        b.state = "idle";
+      }
+      break;
+    case "dead":
+      if (Math.random() < 0.15) puff(b.x + (Math.random() - 0.5) * b.w, b.y - Math.random() * b.h);
+      if (b.timer <= 0) {
+        for (let i = 0; i < 5; i++) puff(b.x + (i - 2) * 14, b.y - b.h / 2 + (i % 2) * 10);
+        for (let i = -2; i <= 2; i++) coins.push({ x: b.x + i * 12, y: b.y - 10 });
+        if (exit) exit.locked = false;
+        notice = { text: "보물상자가 열렸어요!", sub: "", t: 2 };
+        boss = null;
+      }
+      break;
+  }
+}
+
+// ── 던전 지킴이 이야기 장면 ──
+// 가까이 가면 말풍선 → 여우가 체리를 들어 보임 → 체리가 지킴이에게 빨려 들어감 → 지킴이 손짓 → 던전 입구가 열림
+const SCENE_TIME = { talk: 2.2, show: 1.0, fly: 0.7, gesture: 1.1, open: 1.5 };
+function updateScene(dt) {
+  if (!keeper || !hazardsOn) return;
+  const dist = Math.abs(pcx() - keeper.x);
+  if (!scene) {
+    if (keeper.wait && dist > 80) keeper.wait = false;
+    if (exit && exit.locked && !keeper.wait && dist < 56 && player.onGround) {
+      scene = { step: "talk", t: SCENE_TIME.talk, has: cherries > 0 };
+      player.facing = keeper.x > pcx() ? 1 : -1;
+    }
+    return;
+  }
+  scene.t -= dt;
+  keeper.gesture = scene.step === "gesture" ? scene.t : 0;
+  if (scene.step === "open") { gate.open = 1 - Math.max(0, scene.t) / SCENE_TIME.open; shake = Math.max(shake, 0.05); }
+  if (scene.t > 0) return;
+  const next = (step) => { scene.step = step; scene.t = SCENE_TIME[step]; };
+  if (scene.step === "talk") {
+    if (!scene.has) { scene = null; keeper.wait = true; return; } // 체리가 없으면 다시 가져와야 함
+    next("show"); player.vy = -150; // 폴짝 뛰며 체리를 들어 보임
+  } else if (scene.step === "show") next("fly");
+  else if (scene.step === "fly") { cherries--; puff(keeper.x, keeper.y - 18); playSfx("coin", 0.8, 0.7); next("gesture"); }
+  else if (scene.step === "gesture") { next("open"); playSfx("jump", 0.5, 0.4); }
+  else { gate.open = 1; exit.locked = false; scene = null; }
+}
+
+function clearStage() {
+  totalTime += stageTime;
+  const last = stage === STAGES.length - 1;
+  phase = last ? "allclear" : "clear";
+  phaseAt = performance.now();
+  const got = score - scoreAtStageStart;
+  if (!last) {
+    clearInfo = { text: `스테이지 ${stage + 1} 클리어!`, sub: `금화 ${got}개 · ${stageTime.toFixed(1)}초` };
+    clearTimer = CLEAR_WAIT;
+    playSfx("coin", 0.8);
+    return;
+  }
+  const newBest = !best || totalTime < best;
+  if (newBest) { best = totalTime; try { localStorage.setItem("fox-dungeon-best", String(best)); } catch {} }
+  msg.innerHTML = `<b>던전 탈출!</b><div>문지기를 쓰러뜨리고 마지막 보물상자를 열었어요</div>` +
+                  `<div>금화 ${score}개 · 무찌른 몹 ${kills}마리 · ${totalTime.toFixed(1)}초` +
+                  (newBest ? " · 최고 기록!" : ` · 최고 ${best.toFixed(1)}초`) + "</div><div style='margin-top:14px'>아무 키나 눌러서 처음부터</div>";
+  msg.classList.remove("hide");
 }
 
 function endGame() {
   gameOver = true;
   gameOverAt = performance.now();
-  const newBest = score > best;
-  if (newBest) { best = score; try { localStorage.setItem("fox-best", String(best)); } catch {} }
-  msg.innerHTML = `<b>게임 끝!</b>금화 ${score}개` + (newBest ? " · 최고 기록!" : ` · 최고 ${best}개`) +
-                  "<br><br>아무 키나 눌러서 다시 시작";
+  msg.innerHTML = `<b>게임 끝!</b><div>스테이지 ${stage + 1} · ${STAGES[stage].name}</div>` +
+                  "<small>목숨 3개로 이 스테이지 처음부터 다시 해요</small><div style='margin-top:14px'>아무 키나 눌러서 다시 시작</div>";
   msg.classList.remove("hide");
 }
 
+// ── 그리기 ──
 function frameOf(anim, time) {
   const f = Math.floor(time * anim.fps);
   return anim.loop === false ? Math.min(f, anim.frames - 1) : f % anim.frames;
 }
+function drawSpr(name, x, y, opt = {}) { // 던전 타일셋의 한 칸
+  const [c, r] = SPR[name], w = opt.w || 16, h = opt.h || 16;
+  ctx.save();
+  if (opt.flip) { ctx.translate(Math.round(x) + w, Math.round(y)); ctx.scale(-1, 1); } else ctx.translate(Math.round(x), Math.round(y));
+  if (opt.filter) ctx.filter = opt.filter;
+  ctx.drawImage(images.tiles, c * TILE, r * TILE, TILE, TILE, 0, 0, w, h);
+  ctx.restore();
+}
+function drawSheet(name, frame, x, y, opt = {}) { // 가로 한 줄 시트의 한 칸 (k 배로 키울 수 있음)
+  const s = SHEETS[name], k = opt.k || 1, w = s.fw * k, h = s.fh * k;
+  ctx.save();
+  if (opt.flip) { ctx.translate(Math.round(x) + w, Math.round(y)); ctx.scale(-1, 1); } else ctx.translate(Math.round(x), Math.round(y));
+  if (opt.filter) ctx.filter = opt.filter;
+  ctx.drawImage(images[name], (frame % s.frames) * s.fw, 0, s.fw, s.fh, 0, 0, w, h);
+  ctx.restore();
+}
+function outlinedText(text, x, y, size, color) {
+  ctx.font = `bold ${size}px "Malgun Gothic", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.lineWidth = 3; ctx.strokeStyle = "#000"; ctx.strokeText(text, x, y);
+  ctx.fillStyle = color; ctx.fillText(text, x, y);
+}
+function drawSpikes(x0, y0, rise) {
+  const widths = [1, 1, 3, 3, 3, 5], n = Math.round(widths.length * rise);
+  for (let k = 0; k < 3; k++) {
+    const bx = x0 + 1 + k * 5;
+    for (let i = widths.length - n; i < widths.length; i++) {
+      const w = widths[i], y = y0 + 10 + i;
+      ctx.fillStyle = "#2a1f33"; ctx.fillRect(bx + (5 - w) / 2 - 1, y, w + 2, 1);
+      ctx.fillStyle = i < 2 ? "#ffffff" : "#c8cfe0"; ctx.fillRect(bx + (5 - w) / 2, y, w, 1);
+    }
+  }
+}
+function drawTorch(x, y, time) { // 벽에 박힌 쇠받침 + 불꽃 (픽셀로 그림)
+  x = Math.round(x);
+  ctx.fillStyle = "#1c1426"; ctx.fillRect(x + 4, y + 9, 8, 2); ctx.fillRect(x + 6, y + 11, 4, 3);
+  ctx.fillStyle = "#5d6070"; ctx.fillRect(x + 5, y + 8, 6, 2); ctx.fillRect(x + 7, y + 10, 2, 3);
+  const f = Math.floor(time * 10 + x) % 3;
+  ctx.fillStyle = "#ff6a2b"; ctx.fillRect(x + 5, y + 2 - f % 2, 6, 6 + f % 2);
+  ctx.fillStyle = "#ffb347"; ctx.fillRect(x + 6, y + 3, 4, 5);
+  ctx.fillStyle = "#ffe9a8"; ctx.fillRect(x + 7, y + 5 + (f === 1 ? 1 : 0), 2, 2);
+}
+function warnMark(x, y, time) {
+  if (Math.floor(time * 12) % 2) return;
+  x = Math.round(x); y = Math.round(y);
+  ctx.fillStyle = "#000"; ctx.fillRect(x - 2, y - 9, 5, 10);
+  ctx.fillStyle = "#ff3b5c"; ctx.fillRect(x - 1, y - 8, 3, 5); ctx.fillRect(x - 1, y - 2, 3, 2);
+}
+function bubble(text, cx, bottom) { // 픽셀 말풍선
+  ctx.font = 'bold 10px "Malgun Gothic", sans-serif';
+  const tw = Math.ceil(ctx.measureText(text).width), w = tw + 12, h = 18;
+  const x = Math.round(cx - w / 2), y = Math.round(bottom - h - 5);
+  ctx.fillStyle = "#2a1f33";
+  ctx.fillRect(x + 1, y, w - 2, h); ctx.fillRect(x, y + 1, w, h - 2);
+  ctx.fillStyle = "#fff8e8";
+  ctx.fillRect(x + 2, y + 1, w - 4, h - 2); ctx.fillRect(x + 1, y + 2, w - 2, h - 4);
+  const tx = Math.round(cx) - 2; // 꼬리
+  ctx.fillStyle = "#2a1f33"; ctx.fillRect(tx - 1, y + h, 6, 2); ctx.fillRect(tx, y + h + 2, 4, 2); ctx.fillRect(tx + 1, y + h + 4, 2, 1);
+  ctx.fillStyle = "#fff8e8"; ctx.fillRect(tx, y + h - 1, 4, 2); ctx.fillRect(tx + 1, y + h + 1, 2, 2);
+  ctx.fillStyle = "#2a1f33"; ctx.textAlign = "center"; ctx.fillText(text, Math.round(cx), y + 13);
+}
+
+// 던전 벽 배경
+let bgCanvas = null;
+function buildBackground() {
+  if (!images.tiles || theme !== "dungeon") { bgCanvas = null; return; }
+  bgCanvas = document.createElement("canvas");
+  bgCanvas.width = 256; bgCanvas.height = H;
+  const b = bgCanvas.getContext("2d");
+  b.imageSmoothingEnabled = false;
+  for (let y = 0; y < H; y += TILE)
+    for (let x = 0; x < 256; x += TILE) {
+      const bars = ((x / TILE) * 7 + (y / TILE) * 3 + stage) % 23 === 0;
+      const [c, r] = bars ? SPR.brickBars : SPR.brick;
+      b.drawImage(images.tiles, c * TILE, r * TILE, TILE, TILE, x, y, TILE, TILE);
+    }
+  b.fillStyle = "rgba(12, 6, 24, 0.6)";
+  b.fillRect(0, 0, 256, H);
+}
+
+// 어둠: 어두운 막에 빛 자리만 구멍을 뚫음
+const shade = document.createElement("canvas");
+shade.width = W; shade.height = H;
+const sctx = shade.getContext("2d");
+function makeShade(alpha, lights) {
+  sctx.globalCompositeOperation = "source-over";
+  sctx.clearRect(0, 0, W, H);
+  sctx.fillStyle = `rgba(4, 2, 10, ${alpha})`;
+  sctx.fillRect(0, 0, W, H);
+  sctx.globalCompositeOperation = "destination-out";
+  for (const [sx, y, r, a] of lights) {
+    if (sx < -r || sx > W + r) continue;
+    const g = sctx.createRadialGradient(sx, y, 0, sx, y, r);
+    g.addColorStop(0, `rgba(0,0,0,${a})`); g.addColorStop(0.55, `rgba(0,0,0,${a * 0.7})`); g.addColorStop(1, "rgba(0,0,0,0)");
+    sctx.fillStyle = g;
+    sctx.fillRect(sx - r, y - r, r * 2, r * 2);
+  }
+  return shade;
+}
+const torchX = (d, camX) => d.x - camX * 0.5; // 횃불은 벽(배경)에 붙어 있어서 배경과 같은 빠르기로 움직임
 
 function draw(time) {
+  ctx = mainCtx;
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.imageSmoothingEnabled = false;
+  const dungeon = theme === "dungeon";
 
-  // 화면이 여우를 따라감
-  const camX = Math.round(Math.max(0, Math.min(WORLD_W - W, player.x + player.w / 2 - W / 2)));
+  const camX = Math.round(Math.max(0, Math.min(WORLD_W - W, pcx() - W / 2)));
+  let shakeX = 0, shakeY = 0;
+  if (shake > 0) { shakeX = Math.round((Math.random() - 0.5) * 6); shakeY = Math.round((Math.random() - 0.5) * 6); }
 
-  // 배경 3장: 뒤 레이어일수록 천천히 (패럴랙스)
-  ctx.fillStyle = "rgb(44, 1, 39)";
-  ctx.fillRect(0, 0, W, H);
-  for (const L of LAYERS) {
-    const off = Math.round(camX * L.speed) % L.w;
-    for (let x = -off; x < W; x += L.w) ctx.drawImage(images[L.name], x, L.y);
+  // ① 배경
+  if (dungeon) {
+    ctx.fillStyle = "#0a0614"; ctx.fillRect(0, 0, W, H);
+    const off = Math.round(camX * 0.5) % 256;
+    for (let x = -off; x < W; x += 256) ctx.drawImage(bgCanvas, x, 0);
+    for (const d of decor) if (d.kind === "t") { const sx = torchX(d, camX); if (sx > -16 && sx < W) drawTorch(sx, d.y, time); }
+    // 벽이 아닌 꾸밈(기둥·통)은 배경과 같이 어둡게: 여우가 다가가도 밝아지지 않음
+    ctx.save(); ctx.translate(-camX + shakeX, shakeY);
+    for (const d of decor) {
+      if (d.x < camX - 32 || d.x > camX + W + 32) continue;
+      if (d.kind === "I") { drawSpr("pillarTop", d.x, d.y - 16); drawSpr("pillarBot", d.x, d.y); }
+      else if (d.kind === "b") drawSpr("barrel", d.x, d.y);
+    }
+    ctx.restore();
+    const torchLights = decor.filter((d) => d.kind === "t").map((d) => [torchX(d, camX), d.y + 4, 70 + Math.sin(time * 9 + d.x) * 4, 0.9]);
+    ctx.drawImage(makeShade(0.62, torchLights), 0, 0);
+  } else {
+    ctx.fillStyle = "#2fb2ee"; ctx.fillRect(0, 0, W, H);
+    for (const L of FOREST_LAYERS) {
+      const off = Math.round(camX * L.speed) % L.w;
+      for (let x = -off; x < W; x += L.w) ctx.drawImage(images[L.name], x, L.y);
+    }
   }
 
+  // ② 앞쪽(벽·몹·여우). 던전에서는 따로 그린 뒤 어둠을 씌움
+  if (dungeon) {
+    ctx = fctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0); ctx.imageSmoothingEnabled = false;
+  }
   ctx.save();
-  ctx.translate(-camX, 0);
+  ctx.translate(-camX + shakeX, shakeY);
+  drawWorld(time, camX);
+  ctx.restore();
+  if (dungeon) {
+    const lights = [[pcx() - camX, pcy(), 100, 1]];
+    for (const d of decor) if (d.kind === "t") lights.push([torchX(d, camX), d.y + 4, 70, 0.8]);
+    for (const g of graves) if (g.on) lights.push([g.x + 8 - camX, g.y + 4, 56, 0.9]);
+    for (const s of shots) if (s.kind === "fire") lights.push([s.x - camX, s.y, 30, 0.9]);
+    for (const e of enemies) if (e.kind === "mage" && e.state === "cast") lights.push([e.x - camX, e.y, 40, 0.8]);
+    if (exit) lights.push([exit.x + 8 - camX, exit.y + 8, 40, 0.7]);
+    if (boss) lights.push([boss.x - camX, boss.y - boss.h / 2, 80, 0.6]);
+    ctx.globalCompositeOperation = "source-atop"; // 그린 것 위에만 어둠
+    ctx.drawImage(makeShade(0.6, lights), 0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over";
+    ctx = mainCtx;
+    ctx.drawImage(fgCanvas, 0, 0, W, H);
+  }
 
-  // 땅과 발판
-  const c0 = Math.floor(camX / TILE), c1 = c0 + Math.ceil(W / TILE);
-  for (let r = 0; r < ROWS; r++)
-    for (let c = c0; c <= c1 && c < COLS; c++)
-      if (MAP[r][c] === "#") {
-        const [sx, sy] = tileFor(c, r);
-        ctx.drawImage(images.tiles, sx, sy, TILE, TILE, c * TILE, r * TILE, TILE, TILE);
+  // ③ 예고 표시·말풍선은 어둠 위에 그려서 언제나 보이게
+  ctx.save();
+  ctx.translate(-camX + shakeX, shakeY);
+  drawWarnings(time);
+  for (const p of popups) { ctx.globalAlpha = Math.max(0, 1 - p.t / 0.8); outlinedText(p.text, p.x, p.y, 10, p.color); ctx.globalAlpha = 1; }
+  if (scene && keeper) {
+    if (scene.step === "talk") bubble(scene.has ? "던전을 지나가려면 체리를 바쳐라" : "체리가 없구나… 숲에서 하나 가져오너라", keeper.x, keeper.y - 34);
+    if (scene.step === "gesture") bubble("좋다, 지나가거라", keeper.x, keeper.y - 34);
+  }
+  ctx.restore();
+
+  if (flash > 0) { ctx.fillStyle = "rgba(255, 40, 70, 0.25)"; ctx.fillRect(0, 0, W, H); }
+
+  if (boss && boss.state !== "sleep") { // 보스 체력
+    const bw = 200, x = (W - bw) / 2, y = 44;
+    outlinedText(boss.name, W / 2, y - 4, 11, "#ffb3c0");
+    ctx.fillStyle = "#000"; ctx.fillRect(x - 2, y - 1, bw + 4, 8);
+    ctx.fillStyle = "#4a1020"; ctx.fillRect(x, y + 1, bw, 4);
+    ctx.fillStyle = boss.flash > 0 ? "#ffffff" : "#ff3b5c"; ctx.fillRect(x, y + 1, Math.round(bw * Math.max(0, boss.hp) / boss.maxHp), 4);
+  }
+  const card = (a, b2, alpha = 1) => {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(6, 3, 12, 0.75)"; ctx.fillRect(0, 92, W, 58);
+    outlinedText(a, W / 2, 116, 18, "#ffd54a");
+    if (b2) outlinedText(b2, W / 2, 138, 12, "#ffffff");
+    ctx.globalAlpha = 1;
+  };
+  if (started && phase === "play" && !gameOver && cardTime > 0) card(`스테이지 ${stage + 1} · ${STAGES[stage].name}`, STAGES[stage].hint, Math.min(1, cardTime / 0.5));
+  else if (phase === "play" && notice) card(notice.text, notice.sub, Math.min(1, notice.t / 0.5));
+  if (phase === "clear" && clearInfo) card(clearInfo.text, clearInfo.sub);
+
+  hud.innerHTML = `<span class="hearts">${"♥".repeat(Math.max(0, lives))}${"♡".repeat(LIVES - Math.max(0, lives))}</span>` +
+                  `<span>금화 ${score}</span><span class="cherry">체리 ${cherries}</span>` +
+                  `<span class="right">스테이지 ${stage + 1}/${STAGES.length} · ${(totalTime + (phase === "play" ? stageTime : 0)).toFixed(0)}초</span>`;
+}
+
+function drawWorld(time, camX) {
+  const dungeon = theme === "dungeon";
+  if (!dungeon) for (const d of decor) if (d.kind === "w") { const [c, r] = FT.grass[d.v]; ctx.drawImage(images.forest, c * TILE, r * TILE, TILE, TILE, d.x, d.y, TILE, TILE); }
+
+  // 던전 입구 (숲 끝): 돌로 쌓은 큰 문 + 쇠창살
+  if (gate) {
+    const gx = gate.x, top = gate.bottom - 7 * TILE;
+    for (let r = 0; r < 7; r++)
+      for (let c = 0; c < 6; c++) {
+        if (c >= 2 && c <= 3 && r >= 4) continue; // 문 구멍
+        const [sc, sr] = r === 0 ? [1, 3] : SPR.brick;
+        ctx.drawImage(images.tiles, sc * TILE, sr * TILE, TILE, TILE, gx + c * TILE, top + r * TILE, TILE, TILE);
       }
+    ctx.fillStyle = "#07040c"; ctx.fillRect(gx + 2 * TILE, gate.bottom - 3 * TILE, 2 * TILE, 3 * TILE);
+    drawSpr("banner", gx + 0.5 * TILE, top + 2 * TILE); drawSpr("banner", gx + 4.5 * TILE, top + 2 * TILE);
+    const lift = Math.round(gate.open * 3 * TILE), ox = gx + 2 * TILE, oy = gate.bottom - 3 * TILE;
+    ctx.save(); ctx.beginPath(); ctx.rect(ox, oy, 2 * TILE, 3 * TILE); ctx.clip();
+    for (let i = 0; i < 5; i++) { ctx.fillStyle = "#1c1426"; ctx.fillRect(ox + 2 + i * 7, oy - lift, 3, 3 * TILE); ctx.fillStyle = "#6d7184"; ctx.fillRect(ox + 3 + i * 7, oy - lift, 1, 3 * TILE); }
+    for (let j = 0; j < 4; j++) { ctx.fillStyle = "#1c1426"; ctx.fillRect(ox, oy - lift + 6 + j * 12, 2 * TILE, 2); }
+    ctx.restore();
+  }
+  if (keeper) { // 던전 지킴이 (손짓할 때 팔랑팔랑)
+    const g = keeper.gesture > 0, bob = g ? -Math.round(Math.abs(Math.sin(time * 14)) * 3) : Math.round(Math.sin(time * 2));
+    drawSpr("keeper", keeper.x - 16, keeper.y - 32 + bob, { w: 32, h: 32, flip: g && Math.floor(time * 8) % 2 === 0 });
+    if (g) { ctx.fillStyle = "#c9f6ff"; for (let i = 0; i < 4; i++) ctx.fillRect(Math.round(keeper.x + Math.cos(time * 7 + i * 1.6) * 20), Math.round(keeper.y - 24 + Math.sin(time * 7 + i * 1.6) * 10), 2, 2); }
+  }
 
-  // 금화 (6×7 이 너무 작아서 2배로)
-  const cf = frameOf(COIN, time);
+  const c0 = Math.floor(camX / TILE) - 1, c1 = c0 + Math.ceil(W / TILE) + 2, sheet = dungeon ? images.tiles : images.forest;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = Math.max(0, c0); c <= c1 && c < COLS; c++)
+      if (GRID[r][c] === "#") {
+        const [sx, sy] = tileFor(c, r);
+        ctx.drawImage(sheet, sx * TILE, sy * TILE, TILE, TILE, c * TILE, r * TILE, TILE, TILE);
+      }
+  for (const g of gargoyles) drawSpr("gargoyle", g.x, g.y, { flip: g.dir > 0 });
+  for (const s of spikes) drawSpikes(s.c * TILE, s.r * TILE, 1);
+  for (const p of pops) {
+    const rise = p.state === "up" ? 1 : p.state === "warn" ? (Math.floor(time * 16) % 2 ? 0.34 : 0.17) : 0;
+    ctx.fillStyle = "#1c1426"; ctx.fillRect(p.c * TILE + 1, p.r * TILE + 15, 14, 1);
+    if (rise) drawSpikes(p.c * TILE, p.r * TILE, rise);
+  }
+  for (const g of graves) drawSpr("banner", g.x, g.y, { filter: g.on ? "none" : "grayscale(1) brightness(0.6)" });
+  if (exit && !exit.gate) {
+    drawSpr("chest", exit.x, exit.y);
+    if (exit.locked) {
+      ctx.fillStyle = "#8a8fa3";
+      for (let i = 0; i < 16; i += 3) { ctx.fillRect(exit.x + i, exit.y + 4 + (i % 2), 2, 2); ctx.fillRect(exit.x + i, exit.y + 11 - (i % 2), 2, 2); }
+    } else {
+      const s = Math.floor(time * 3) % 3, sp = [[-3, -2], [16, 2], [6, -6]][s];
+      ctx.fillStyle = "#fff6a8"; ctx.fillRect(exit.x + sp[0], exit.y + sp[1], 2, 2);
+    }
+  }
+  for (const p of potions) drawSpr("potion", p.x - 8, p.y - 8 + Math.round(Math.sin(p.t * 3) * 2));
+  for (const k of items) {
+    const s = SHEETS[k.kind], f = frameOf(s, time + k.x * 0.01);
+    drawSheet(k.kind, f, k.x - s.fw / 2, k.y - s.fh / 2 + Math.round(Math.sin(time * 3 + k.x) * 1.5));
+  }
+  const cf = frameOf(SHEETS.coin, time);
   for (const k of coins)
-    ctx.drawImage(images.coin, cf * COIN.fw, 0, COIN.fw, COIN.fh, k.x - COIN.fw, k.y - COIN.fh, COIN.fw * 2, COIN.fh * 2);
+    ctx.drawImage(images.coin, cf * 6, 0, 6, 7, Math.round(k.x) - 6, Math.round(k.y) - 7, 12, 14);
 
-  // 가시 철퇴
   for (const b of balls) {
+    if (b.type === "drop") { ctx.fillStyle = "#5d6070"; for (let y = b.top; y < b.y - 12; y += 4) ctx.fillRect(Math.round(b.x) - 1, y, 2, 2); }
     ctx.save();
-    ctx.translate(Math.round(b.x), Math.round(b.y));
+    let x = b.x;
+    if ((b.type === "drop" || b.type === "rock") && b.state === "warn") x += Math.round(Math.sin(time * 60) * 1.5);
+    ctx.translate(Math.round(x), Math.round(b.y));
     if (b.type === "roll") ctx.rotate(b.angle);
     ctx.drawImage(images.ball, -14, -14);
     ctx.restore();
   }
 
-  // 여우 (맞은 뒤 무적일 때는 깜빡임)
-  if (!(invincible > 0 && hitTimer <= 0 && Math.floor(time * 12) % 2)) {
-    const sheet = player.anim === "fall" ? "jump" : player.anim;
-    const frame = player.anim === "jump" ? 0 : player.anim === "fall" ? 1 : frameOf(FOX[sheet], player.animTime);
-    const x = Math.round(player.x - 8), y = Math.round(player.y - 12);
+  // 몹
+  const red = "sepia(1) saturate(6) hue-rotate(-40deg)";
+  for (const e of enemies) {
+    const white = e.flash > 0 ? "brightness(3)" : "none";
+    const warnRed = (e.state === "warn" || e.state === "windup") && Math.floor(time * 14) % 2 ? red : white;
+    const shk = (e.state === "warn" || e.state === "windup") ? Math.round(Math.sin(time * 60)) : 0;
+    const bottom = e.y + e.h / 2;
+    switch (e.kind) {
+      case "slime": {
+        const sq = Math.round(Math.abs(Math.sin(e.t * 5)) * 2);
+        drawSpr("slime", e.x - 8, bottom - 16 + sq, { h: 16 - sq, flip: e.dir > 0, filter: white });
+        break;
+      }
+      case "ghost": ctx.globalAlpha = 0.85; drawSpr("ghost", e.x - 8, e.y - 8, { flip: Math.cos(e.t * 0.9) > 0, filter: white }); ctx.globalAlpha = 1; break;
+      case "bat": drawSpr("bat", e.x - 8 + shk, e.y - 8 + (e.state === "hang" ? 0 : Math.round(Math.sin(e.t * 20) * 2)), { flip: e.vx > 0, filter: white }); break;
+      case "spider":
+        ctx.fillStyle = "#cfd3e0"; ctx.fillRect(Math.round(e.x), e.top, 1, Math.max(0, Math.round(e.y - 6 - e.top)));
+        drawSpr("spider", e.x - 8 + shk, e.y - 9, { filter: white });
+        break;
+      case "ogre":
+        drawSpr("ogre", e.x - 12 + shk, bottom - 24, { w: 24, h: 24, flip: e.dir > 0, filter: warnRed });
+        if (e.state === "rest") { ctx.fillStyle = "#ffe08a"; for (let i = 0; i < 3; i++) ctx.fillRect(Math.round(e.x + Math.cos(time * 6 + i * 2.1) * 8), Math.round(e.y - 16 + Math.sin(time * 6 + i * 2.1) * 2), 2, 2); }
+        break;
+      case "mage":
+        drawSpr("mage", e.x - 8, bottom - 16, { flip: e.dir > 0, filter: white });
+        if (e.state === "cast") {
+          const k = 1 - Math.max(0, e.timer) / 0.8, r = 1 + Math.round(k * 3), hx = Math.round(e.x + e.dir * 8), hy = Math.round(e.y - 4);
+          ctx.fillStyle = "#ff6a2b"; ctx.fillRect(hx - r, hy - r, r * 2, r * 2);
+          ctx.fillStyle = "#ffe08a"; ctx.fillRect(hx - 1, hy - 1, 2, 2);
+        }
+        break;
+      case "opossum":
+        drawSheet("opossum", frameOf(SHEETS.opossum, e.state === "rush" ? e.t * 2 : e.t), e.x - 17 + shk, bottom - 24, { flip: e.dir > 0, filter: warnRed });
+        break;
+      case "frog": {
+        const f = e.air ? (e.vy < 0 ? 1 : 2) : e.state === "warn" ? 0 : frameOf(SHEETS.frogIdle, e.t);
+        drawSheet(e.air ? "frogJump" : "frogIdle", f, e.x - 17 + shk, bottom - 30, { flip: e.angry && (e.vx || e.dir) > 0, filter: warnRed });
+        break;
+      }
+      case "eagle": {
+        const flip = (e.state === "dive" || e.state === "back" ? e.vx : Math.cos(e.t * 0.8)) > 0;
+        drawSheet("eagle", frameOf(SHEETS.eagle, e.t), e.x - 20 + shk, e.y - 22, { flip, filter: warnRed });
+        break;
+      }
+    }
+  }
+
+  // 보스
+  if (boss) {
+    const b = boss;
+    const tele = b.state === "windup" || b.state === "crouch" || b.state === "roar";
+    const filter = b.flash > 0 ? "brightness(3)" : tele && Math.floor(time * 14) % 2 ? red
+                 : b.state === "dead" && Math.floor(time * 20) % 2 ? "brightness(2.5)" : "none";
+    const sh = (b.state === "windup" || b.state === "roar") ? Math.round(Math.sin(time * 60) * 1.5) : 0;
+    if (b.type === "frog") {
+      const air = b.state === "air", f = air ? (b.vy < 0 ? 1 : 2) : frameOf(SHEETS.frogIdle, b.t);
+      drawSheet(air ? "frogJump" : "frogIdle", f, b.x - 35 + sh, b.y - 60, { k: 2, flip: b.dir > 0, filter });
+    } else {
+      const squat = b.state === "crouch" ? 12 : 0;
+      drawSpr("ogre", b.x - 48 + sh, b.y - 96 + squat, { w: 96, h: 96 - squat, flip: b.dir > 0, filter });
+    }
+    if (b.state === "stun") { ctx.fillStyle = "#ffe08a"; for (let i = 0; i < 4; i++) ctx.fillRect(Math.round(b.x + Math.cos(time * 5 + i * 1.6) * 20), Math.round(b.y - b.h - 6 + Math.sin(time * 5 + i * 1.6) * 3), 2, 2); }
+  }
+
+  for (const s of shots) {
+    if (s.kind === "arrow") {
+      ctx.fillStyle = "#6b4a2f"; ctx.fillRect(Math.round(s.x - 5), Math.round(s.y), 10, 1);
+      ctx.fillStyle = "#d8d0c0"; ctx.fillRect(Math.round(s.x + (s.vx > 0 ? 4 : -6)), Math.round(s.y) - 1, 2, 3);
+    } else if (s.kind === "fire") {
+      const f = Math.floor(time * 16) % 2;
+      ctx.fillStyle = "#ff6a2b"; ctx.fillRect(Math.round(s.x) - 4, Math.round(s.y) - 4, 8, 8);
+      ctx.fillStyle = "#ffb347"; ctx.fillRect(Math.round(s.x) - 3 + f, Math.round(s.y) - 3, 5, 5);
+      ctx.fillStyle = "#fff3c4"; ctx.fillRect(Math.round(s.x) - 1, Math.round(s.y) - 1, 2, 2);
+    } else {
+      ctx.fillStyle = "#c9b8ff";
+      for (let i = 0; i < 4; i++) ctx.fillRect(Math.round(s.x - 6 + i * 3), Math.round(s.y + 6 - (i % 2 ? 9 : 5)), 2, i % 2 ? 9 : 5);
+    }
+  }
+
+  // 대시 잔상
+  for (const g of trail) {
     ctx.save();
-    if (player.facing < 0) { ctx.translate(x + FOX_W, y); ctx.scale(-1, 1); }
-    else ctx.translate(x, y);
-    ctx.drawImage(images[sheet], frame * FOX_W, 0, FOX_W, FOX_H, 0, 0, FOX_W, FOX_H);
+    ctx.globalAlpha = 0.35 * (1 - g.t / 0.2);
+    const x = Math.round(g.x - FOX_OX), y = Math.round(g.y - FOX_OY);
+    if (g.facing < 0) { ctx.translate(x + FOX_W, y); ctx.scale(-1, 1); } else ctx.translate(x, y);
+    ctx.filter = "brightness(1.6) hue-rotate(220deg)";
+    ctx.drawImage(images.run, FOX_W, 0, FOX_W, FOX_H, 0, 0, FOX_W, FOX_H);
     ctx.restore();
   }
-  ctx.restore();
-
-  hud.innerHTML = `<span class="hearts">${"♥".repeat(Math.max(0, lives))}${"♡".repeat(LIVES - Math.max(0, lives))}</span>` +
-                  `<span>금화 ${score}</span><span class="best">최고 ${best}</span>`;
+  // 여우
+  if (!(invincible > 0 && hitTimer <= 0 && !scene && Math.floor(time * 12) % 2)) {
+    const sheet = player.anim === "fall" ? "jump" : player.anim;
+    const frame = player.anim === "jump" ? 0 : player.anim === "fall" ? 1 : frameOf(FOX[sheet], player.animTime);
+    const x = Math.round(player.x - FOX_OX), y = Math.round(player.y - FOX_OY);
+    ctx.save();
+    if (player.facing < 0) { ctx.translate(x + FOX_W, y); ctx.scale(-1, 1); } else ctx.translate(x, y);
+    if (attackTime > 0) ctx.drawImage(images.run, 2 * FOX_W, 0, FOX_W, FOX_H, 1, 0, FOX_W, FOX_H);
+    else ctx.drawImage(images[sheet], frame * FOX_W, 0, FOX_W, FOX_H, 0, 0, FOX_W, FOX_H);
+    ctx.restore();
+  }
+  // 할퀴기 (가로 베기 그림)
+  if (slashT > 0) {
+    const s = SHEETS.slash, f = Math.min(s.frames - 1, Math.floor((s.frames / s.fps - slashT) * s.fps));
+    const x = player.facing > 0 ? pcx() - 10 : pcx() - s.fw + 10;
+    drawSheet("slash", f, x, pcy() - 15, { flip: player.facing < 0 });
+  }
+  // 체리 바치기 장면
+  if (scene && (scene.step === "show" || scene.step === "fly")) {
+    const s = SHEETS.cherry, f = frameOf(s, time);
+    const hx = pcx() - s.fw / 2, hy = player.y - 24 + Math.round(Math.sin(time * 8) * 2);
+    if (scene.step === "show") drawSheet("cherry", f, hx, hy);
+    else {
+      const k = 1 - scene.t / SCENE_TIME.fly, kk = k * k;
+      const x = hx + (keeper.x - s.fw / 2 - hx) * kk, y = hy + (keeper.y - 26 - hy) * kk - Math.sin(k * Math.PI) * 20;
+      const sz = Math.max(0.3, 1 - k * 0.7);
+      ctx.save(); ctx.translate(Math.round(x + s.fw / 2), Math.round(y + s.fh / 2)); ctx.scale(sz, sz);
+      ctx.drawImage(images.cherry, (f % s.frames) * s.fw, 0, s.fw, s.fh, -s.fw / 2, -s.fh / 2, s.fw, s.fh);
+      ctx.restore();
+    }
+  }
+  for (const e of effects) {
+    const s = SHEETS.puff, f = Math.min(s.frames - 1, Math.floor(e.t * s.fps));
+    drawSheet("puff", f, e.x - s.fw / 2, e.y - s.fh / 2);
+  }
+  for (const b of bits) { ctx.fillStyle = b.color; ctx.fillRect(Math.round(b.x), Math.round(b.y), 2, 2); }
 }
 
-// 확인 도구(week-04/check)가 게임을 들여다보는 창구
+function drawWarnings(time) {
+  for (const b of balls)
+    if ((b.type === "drop" || b.type === "rock") && b.state === "warn" && Math.floor(time * 10) % 2 === 0) {
+      ctx.fillStyle = "#ff3b5c";
+      ctx.fillRect(Math.round(b.x) - 10, b.landY + 12, 20, 2);
+      ctx.fillRect(Math.round(b.x) - 2, b.landY - 2, 4, 8);
+      ctx.fillRect(Math.round(b.x) - 2, b.landY + 8, 4, 2);
+    }
+  for (const e of enemies)
+    if (e.alive && (e.state === "warn" || e.state === "windup" || e.state === "cast")) {
+      const top = e.kind === "eagle" ? e.y - 20 : e.kind === "opossum" || e.kind === "frog" ? e.y + e.h / 2 - 24 : e.y - e.h / 2 - 4;
+      warnMark(e.x, top, time);
+    }
+  for (const g of gargoyles)
+    if (g.state === "warn") {
+      ctx.fillStyle = Math.floor(time * 14) % 2 ? "#ff3b5c" : "#ffb3c0";
+      ctx.fillRect(g.x + 4, g.y + 6, 3, 2); ctx.fillRect(g.x + 9, g.y + 6, 3, 2);
+      warnMark(g.x + 8, g.y - 2, time);
+    }
+  for (const p of pops) if (p.state === "warn") { ctx.fillStyle = "#ff3b5c"; ctx.fillRect(p.c * TILE + 2, p.r * TILE + 14, 12, 2); }
+  if (boss && (boss.state === "windup" || boss.state === "crouch" || boss.state === "roar"))
+    warnMark(boss.x, boss.y - (boss.type === "frog" ? 64 : 100), time);
+}
+
+// 확인 도구(week-05/check)가 게임을 들여다보는 창구
 window.CHECK = {
   name: "금화",
   items: () => coins,
   setItems: (v) => { coins = v; },
-  respawn: () => spawnAllCoins(),
-  spots: COIN_SPOTS,
-  count: COIN_COUNT,
+  respawn: () => { coins = stageCoins.map((k) => ({ ...k })); },
+  get spots() { // 금화 + 보석·체리 + 물약 + 출구: 시작 자리에서 모두 닿아야 함
+    const list = stageCoins.map((k) => [Math.floor(k.x / TILE), Math.floor(k.y / TILE)]);
+    for (const p of [...items, ...potions]) list.push([Math.floor(p.x / TILE), Math.floor(p.y / TILE)]);
+    if (exit) list.push([Math.floor((exit.x + exit.w / 2) / TILE), Math.floor((exit.y + exit.h - 1) / TILE)]);
+    return list;
+  },
+  get count() { return stageCoins.length; },
   doubleJump: false,
+  fixedItems: true,
+  stages: STAGES.length,
+  setStage: (i) => { loadStage(i); },
+  stageWith: (ch) => STAGES.findIndex((s) => s.map.some((row) => row.includes(ch))),
+  unlockExit: () => { if (exit) exit.locked = false; boss = null; },
   setHazards: (on) => { hazardsOn = on; },
-  hazards: () => balls,
-  state: () => ({ lives, gameOver, invincible, hitTimer, score }),
+  hazards: () => [...balls, ...enemies.filter((e) => e.alive)],
+  state: () => ({ lives, gameOver, invincible, hitTimer, score, stage, phase }),
 };
 
 // ── 시작 ──
-let loaded = false, last = 0;
+let last = 0;
 function loop(now) {
   const t = now / 1000;
-  const dt = Math.min(t - last, 1 / 30); // 창을 잠깐 내려도 튀지 않게
+  const dt = Math.min(t - last, 1 / 30);
   last = t;
   if (started) update(dt);
   draw(t);
@@ -404,14 +1501,20 @@ function loop(now) {
 
 Promise.all([
   ...Object.entries(FOX).map(([name, a]) => loadImage(name, a.file)),
-  ...LAYERS.map((L) => loadImage(L.name, L.file)),
-  loadImage("coin", COIN.file),
+  ...Object.entries(SHEETS).map(([name, s]) => loadImage(name, s.file)),
+  ...FOREST_LAYERS.map((L) => loadImage(L.name, L.file)),
   loadImage("ball", "spiked-ball.png"),
   loadImage("tiles", "dungeon-tileset.png"),
+  loadImage("forest", "forest-tileset.png"),
 ]).then(() => {
   loaded = true;
-  resetGame();
-  msg.innerHTML = "<b>여우와 달밤 묘지</b>← → 움직이기 · 스페이스 점프<br>가시 철퇴를 피해서 금화를 모아요 (목숨 3개)<br>M 소리 끄기/켜기<br><br>아무 키나 눌러서 시작";
+  newGame();
+  msg.innerHTML = "<b>여우의 지하 던전</b><div>숲을 지나 던전에 들어가, 문지기를 쓰러뜨리고 탈출해요</div>" +
+                  "<div><kbd>←</kbd> <kbd>→</kbd> 움직이기 · <kbd>Space</kbd> 점프 · <kbd>Shift</kbd> 대시 (대시 중엔 무적)</div>" +
+                  "<div><kbd>Z</kbd> 할퀴기는 숲 가운데 깃발에서 배워요</div>" +
+                  "<div>몹은 <span style='color:#ff3b5c'>!</span> 가 뜬 뒤에 공격해요 · 체리는 꼭 챙겨요</div>" +
+                  "<small>M 소리" + (best ? ` · 최고 ${best.toFixed(1)}초` : "") + "</small>" +
+                  "<div style='margin-top:14px'>아무 키나 눌러서 시작</div>";
   requestAnimationFrame((now) => { last = now / 1000; loop(now); });
 }).catch((path) => {
   msg.textContent = "그림을 못 불러왔어요: " + path;
