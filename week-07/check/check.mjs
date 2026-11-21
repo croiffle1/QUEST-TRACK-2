@@ -16,6 +16,8 @@
 //  8-1. 로그인한 상태면 "로그인 자리"가 [로그아웃] 단추로 바뀌고, 누르면 원래 자리로 돌아오는지 (로그인 자체는 아직 없음)
 //  8-2. 가게 주인: 내 가게 등록(리뷰가 없는 가게도), 한 가게에 주인 한 명, 사장님 답글 표시,
 //       댓글 좋아요/싫어요(한 사람 한 번, 내 댓글에는 못 누름), 사장님 매너온도 계산
+//  8-3. 디자인: 중심 색이 하늘색인지, 평균 점수가 가장 큰 글씨인지, 리뷰 사진은 리뷰를 눌러야만 보이는지(목록 · 가게 · 내 프로필),
+//       폰 화면에서 글자가 너무 작지 않은지, 글자와 바탕 색 대비가 충분한지
 //  9. 저장: 다시 열어도 남는지, 저장 공간이 가득 차면 까닭을 알려 주고 되돌리는지, 저장 코드가 store.js 한곳에만 있는지
 // 10. 이상한 글(HTML 태그)이 그대로 글자로 보이는지
 // 11. 폰 · 태블릿 · 컴퓨터 화면 폭(320~1920)에서 잘리거나 옆으로 밀리지 않는지
@@ -267,7 +269,10 @@ try {
   const [pw, ph] = dim.split("x").map(Number);
   check(photo?.startsWith("data:image/jpeg") && Math.max(pw, ph) === 800 && pw / ph > 1.3 && pw / ph < 1.37,
     `2000×1500 사진이 ${dim} 으로 줄어 JPEG(${(photo.length / 1024).toFixed(0)}KB)로 저장됨`, "저장된 사진: " + dim);
-  check(await js(`(() => { const i = document.querySelector(".review .r-photo"); return !!i && i.naturalWidth > 0; })()`), "리뷰에 사진이 보임", "리뷰에 사진이 안 보임");
+  check(await js(`!document.querySelector(".review .r-photo") && document.querySelector(".review .has-photo, .review .r-main.has-photo")?.getAttribute("aria-expanded") === "false"`),
+    "사진을 올린 리뷰도 처음에는 사진이 숨겨져 있음", "사진이 처음부터 보임");
+  await click(".review .r-main.has-photo");
+  check(await js(`(() => { const i = document.querySelector(".review .r-photo"); return !!i && i.naturalWidth > 0; })()`), "그 리뷰를 누르면 사진이 보임", "리뷰를 눌러도 사진이 안 보임");
   d = await js(`({ avg: ${Q(".avg-num")}.innerText, cnt: ${Q(".shop-head .count")}.innerText })`);
   check(d.avg === "4.5" && d.cnt === "리뷰 2개", `같은 가게에 한 번 더 남기면 하나로 묶임: 평균 ${d.avg}, ${d.cnt} ((4+5)÷2)`, "평균: " + JSON.stringify(d));
   await shot("4-사진리뷰");
@@ -295,8 +300,8 @@ try {
   // 9-1. 다시 열어도 남아 있는지
   console.log("[저장]");
   await openApp({ keep: true, hash: "#/shop/" + encodeURIComponent("행복 분식") });
-  d = await js(`({ avg: ${Q(".avg-num")}.innerText, n: document.querySelectorAll(".review").length, c: document.querySelectorAll(".comment").length, p: document.querySelectorAll(".r-photo").length })`);
-  check(d.avg === "4.5" && d.n === 2 && d.c === 1 && d.p === 1, "창을 닫았다 다시 열어도 리뷰 2개 · 사진 · 댓글이 그대로 있음", "다시 연 뒤: " + JSON.stringify(d));
+  d = await js(`({ avg: ${Q(".avg-num")}.innerText, n: document.querySelectorAll(".review").length, c: document.querySelectorAll(".comment").length, p: document.querySelectorAll(".has-photo").length, shown: document.querySelectorAll(".r-photo").length })`);
+  check(d.avg === "4.5" && d.n === 2 && d.c === 1 && d.p === 1 && d.shown === 0, "창을 닫았다 다시 열어도 리뷰 2개 · 사진 · 댓글이 그대로 있고, 사진은 다시 숨겨져 있음", "다시 연 뒤: " + JSON.stringify(d));
 
   // 저장 공간이 가득 찼을 때
   await go("#/write");
@@ -323,7 +328,7 @@ try {
   check(byName["행복 분식"]?.a === "4.0" && byName["행복 분식"].c === "리뷰 3개" && byName["골목 치킨"]?.a === "2.5" && byName["골목 치킨"].c === "리뷰 2개" && byName["할매 국밥"]?.a === "5.0",
     "평균과 리뷰 개수가 맞음: 행복 분식 4.0 (5·4·3), 골목 치킨 2.5 (3·2), 할매 국밥 5.0", "카드: " + JSON.stringify(cards));
   check(await js(`document.querySelector(".sub").innerText.includes("가게 4곳 · 리뷰 10개")`), "위쪽에 \"가게 4곳 · 리뷰 10개\"", "개수 글: " + (await text(".sub")));
-  check(await js(`document.querySelectorAll(".shop-card .thumb img").length === 1`), "사진이 있는 가게(할매 국밥)만 카드에 사진이 보임", "카드 사진 수가 이상함");
+  check(await js(`document.querySelectorAll("main img").length === 0`), "목록에는 리뷰 사진이 하나도 나오지 않음 (사진이 있는 할매 국밥 카드도)", "목록에 사진이 보임");
   check((await names()).join() === "할매 국밥,초밥집,행복 분식,골목 치킨", "처음 순서는 평균 높은 순 (같은 4.0 이면 리뷰 많은 초밥집이 먼저): " + (await names()).join(" > "), "처음 순서: " + (await names()).join());
   await setVal("#sort", "count");
   check((await names()).join() === "초밥집,행복 분식,골목 치킨,할매 국밥", "[리뷰 많은 순]: " + (await names()).join(" > "), "리뷰 많은 순: " + (await names()).join());
@@ -561,6 +566,98 @@ try {
   await openApp({ seed: { ...seedData(null), owners: { "x": "이상함", "y": { name: "", owner: {} }, "z": null }, reviews: seedData(null).reviews.map((r) => ({ ...r, comments: r.comments.map((c) => ({ ...c, likes: "이상함", dislikes: [1, null, "a"] })) })) }, hash: "#/" });
   check(await js(`document.querySelectorAll(".shop-card").length === 4`), "주인 · 좋아요 칸에 이상한 값이 들어 있어도 화면이 그대로 나옴", "이상한 저장 내용에서 화면이 깨짐");
 
+  // 8-3. 디자인
+  console.log("[디자인: 하늘색 · 평균 점수 · 사진은 눌러서 · 폰 글자]");
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  const sdD = seedData(photoUrl);
+  sdD.reviews[2].author = { ...me };                          // 사진이 있는 리뷰(할매 국밥)를 내가 쓴 것으로
+  sdD.owners = { "골목 치킨": ownerOf({ ...me }) };
+  sdD.reviews[0].comments = [{ id: "cr", text: "사장님 답글입니다", createdAt: T0, author: { ...me }, owner: true, likes: ["o-a"], dislikes: [] }];
+  await openApp({ seed: sdD, hash: "#/" });
+  const hueOf = (rgb) => {
+    const [r, g, b] = rgb.map((v) => v / 255), max = Math.max(r, g, b), min = Math.min(r, g, b), dd = max - min;
+    if (!dd) return { h: 0, s: 0 };
+    const h = max === r ? ((g - b) / dd) % 6 : max === g ? (b - r) / dd + 2 : (r - g) / dd + 4;
+    return { h: Math.round(((h * 60) + 360) % 360), s: dd / (1 - Math.abs(max + min - 1) || 1) };
+  };
+  const cols = await js(`(() => { const rgb = (c) => c.match(/[0-9.]+/g).slice(0, 3).map(Number);
+    return { brand: rgb(getComputedStyle(${Q(".nav a[aria-current]")}).backgroundColor), avg: rgb(getComputedStyle(${Q(".avg-num")}).color), page: rgb(getComputedStyle(document.body).backgroundColor) }; })()`);
+  const hb = hueOf(cols.brand), ha = hueOf(cols.avg), hp = hueOf(cols.page);
+  check(hb.h >= 190 && hb.h <= 215 && hb.s > 0.6 && ha.h >= 190 && ha.h <= 215 && hp.h >= 190 && hp.h <= 215,
+    `중심 색이 하늘색 계열임 (단추 · 평균 점수 색상 ${hb.h}°, ${ha.h}°, 바탕 ${hp.h}°)`, "색 계열: " + JSON.stringify({ hb, ha, hp }));
+  await shot("8-3-목록-폰");
+  const FONTS = `(root) => { let max = 0, who = ""; const els = [root, ...root.querySelectorAll("*")];
+    for (const el of els) { if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      const f = parseFloat(getComputedStyle(el).fontSize); if (f > max) { max = f; who = el.className || el.tagName; } } return { max, who }; }`;
+  const big = await js(`(() => { const f = ${FONTS}; return [...document.querySelectorAll(".shop-card")].map((c) => ({ name: c.querySelector(".shop-name").innerText,
+    avg: parseFloat(getComputedStyle(c.querySelector(".avg-num")).fontSize), max: f(c).max, nameSize: parseFloat(getComputedStyle(c.querySelector(".shop-name")).fontSize) })); })()`);
+  check(big.length === 4 && big.every((c) => c.avg >= c.max && c.avg >= c.nameSize * 2),
+    `목록 카드마다 평균 점수(${big[0].avg}px)가 카드 안에서 가장 큰 글씨 (가게 이름 ${big[0].nameSize}px 의 두 배 넘게)`, "카드 글씨 크기: " + JSON.stringify(big));
+  await go(K("행복 분식"));
+  const bigS = await js(`(() => { const f = ${FONTS}; const m = f(document.getElementById("shop-detail"));
+    return { avg: parseFloat(getComputedStyle(${Q(".avg-num")}).fontSize), max: m.max, h1: parseFloat(getComputedStyle(${Q("h1")}).fontSize) }; })()`);
+  check(bigS.avg >= bigS.max && bigS.avg >= bigS.h1 * 2, `가게 화면에서도 평균 점수(${bigS.avg}px)가 가장 큰 글씨 (가게 이름 ${bigS.h1}px 의 두 배 넘게)`, "가게 화면 글씨 크기: " + JSON.stringify(bigS));
+  await shot("8-3-가게-폰");
+
+  // 리뷰 사진은 리뷰를 눌러야만
+  await go(K("할매 국밥"));
+  const photoState = () => js(`({ img: !!document.querySelector(".r-photo"), ok: !!document.querySelector(".r-photo") && document.querySelector(".r-photo").naturalWidth > 0,
+    exp: document.querySelector(".r-main.has-photo")?.getAttribute("aria-expanded"), hint: document.querySelector(".photo-hint")?.innerText.trim() })`);
+  let pp = await photoState();
+  check(!pp.img && pp.exp === "false" && pp.hint === "사진 1장 · 눌러서 보기", "가게 화면에서 사진이 있는 리뷰에는 사진 대신 \"사진 1장 · 눌러서 보기\"만 보임", "처음 상태: " + JSON.stringify(pp));
+  await shot("8-3-사진-접힘");
+  await click(".r-main.has-photo .r-text");
+  await until(`!!document.querySelector(".r-photo") && document.querySelector(".r-photo").naturalWidth > 0`);
+  pp = await photoState();
+  check(pp.ok && pp.exp === "true" && pp.hint === "사진 접기", "리뷰 글을 누르면 사진이 펼쳐지고 \"사진 접기\"로 바뀜", "누른 뒤: " + JSON.stringify(pp));
+  await shot("8-3-사진-펼침");
+  await click(".review .c-form input");
+  check((await photoState()).img, "댓글 칸을 눌러도 사진은 그대로 펼쳐져 있음 (리뷰 글 부분만 누르는 자리)", "댓글 칸을 누르니 사진이 접힘");
+  await setVal(".review .c-form input", "맛있겠네요");
+  await submit(".review .c-form");
+  check((await photoState()).ok, "댓글을 달아 화면이 다시 그려져도 펼친 사진은 그대로 보임", "댓글 뒤 사진이 접힘");
+  await click(".r-main.has-photo");
+  check(!(await photoState()).img, "한 번 더 누르면 사진이 다시 숨겨짐", "다시 눌러도 사진이 남음");
+  await js(`document.querySelector(".r-main.has-photo").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`);
+  check((await photoState()).ok, "키보드(Enter)로도 펼쳐짐", "Enter 로 안 펼쳐짐");
+  await go(K("행복 분식"));
+  check(await js(`document.querySelectorAll(".has-photo").length === 0 && !document.querySelector(".photo-hint")`), "사진이 없는 리뷰에는 누르는 안내가 붙지 않음", "사진 없는 리뷰에 안내가 있음");
+  await go(K("행복 분식"));
+  await go(K("할매 국밥"));
+  check(await js(`!document.querySelector(".r-photo")`), "다른 화면에 갔다 오면 펼쳤던 사진은 다시 숨겨져 있음", "다시 와도 사진이 펼쳐져 있음");
+  await go("#/me");
+  d = await js(`({ n: document.querySelectorAll(".my-review.has-photo").length, img: document.querySelectorAll(".my-review .r-photo").length })`);
+  check(d.n === 1 && d.img === 0, "내 프로필의 내 리뷰도 사진은 숨겨져 있음", "내 프로필 사진: " + JSON.stringify(d));
+  await click(".my-review.has-photo .top-line");
+  await until(`!!document.querySelector(".my-review .r-photo")`);
+  check(await js(`document.querySelectorAll(".my-review .r-photo").length === 1`), "내 프로필에서도 그 리뷰를 누르면 사진이 보임", "내 프로필에서 눌러도 사진이 안 보임");
+
+  // 폰 글자: 너무 작은 글자가 없는지 · 글자와 바탕 색 대비
+  const MIN = `(() => { let min = 99, who = ""; for (const el of document.querySelectorAll("body *")) {
+    if (!el.offsetParent && getComputedStyle(el).position !== "fixed") continue;
+    if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+    const f = parseFloat(getComputedStyle(el).fontSize); if (f < min) { min = f; who = (el.className || el.tagName) + ":" + el.innerText.trim().slice(0, 12); } }
+    return { min, who, body: parseFloat(getComputedStyle(document.body).fontSize) }; })()`;
+  const CONTRAST = `(() => { const parse = (c) => c.match(/[0-9.]+/g).map(Number);
+    const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+    const bgOf = (el) => { for (let e = el; e; e = e.parentElement) { const c = parse(getComputedStyle(e).backgroundColor); if (c.length === 3 || c[3] > 0.9) return c.slice(0, 3); } return [255, 255, 255]; };
+    const out = {};
+    for (const sel of [".count", ".sub", ".hint", ".btn.primary", ".badge", ".nav a", ".nav a[aria-current]", ".chip", ".r-text", ".avg-num", ".temp-num", ".photo-hint", ".react-btn", ".login-slot", ".back", ".menus", ".shop-name"]) {
+      const el = document.querySelector(sel); if (!el) continue;
+      const fg = parse(getComputedStyle(el).color).slice(0, 3), a = lum(fg), b = lum(bgOf(el));
+      out[sel] = Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 10) / 10; }
+    return out; })()`;
+  const seen = {};
+  for (const [label, hash] of [["목록", "#/"], ["가게(사장님)", K("골목 치킨")], ["가게(사진)", K("할매 국밥")], ["리뷰쓰기", "#/write"], ["내프로필", "#/me"]]) {
+    await go(hash);
+    const m = await js(MIN);
+    check(m.min >= 14 && m.body >= 16, `폰 390 (${label}): 가장 작은 글자 ${m.min.toFixed(1)}px, 기본 글자 ${m.body}px`, `폰 (${label}) 글자가 너무 작음: ${m.min.toFixed(1)}px (${m.who})`);
+    Object.assign(seen, await js(CONTRAST));
+  }
+  const low = Object.entries(seen).filter(([, r]) => r < 4.5);
+  check(low.length === 0 && Object.keys(seen).length >= 14, `글자와 바탕 색 대비가 모두 4.5 이상 (${Object.keys(seen).length}곳, 가장 낮은 것 ${Math.min(...Object.values(seen))})`,
+    "대비가 낮은 곳: " + JSON.stringify(low) + " / 확인한 곳 " + Object.keys(seen).length + "곳");
+
   // 10. 이상한 글
   console.log("[이상한 글]");
   const evil = seedData(null);
@@ -605,6 +702,7 @@ try {
       const s = label === "내프로필" ? { ...long, reviews: [{ ...long.reviews[0], author: me }, ...long.reviews.slice(1)] } : long;
       await openApp({ seed: s, hash });
       await sleep(150);
+      if (label === "가게") { await js(`document.querySelector(".has-photo")?.click()`); await sleep(100); }   // 사진을 펼친 모습도 확인
       const f = await js(FIT);
       await shot(`11-${name}${w}-${label}`);
       check(f.scrollW <= f.W && f.out.length === 0, `${name} ${w}×${h} (${label}): 옆으로 밀리거나 잘린 것 없음`,
