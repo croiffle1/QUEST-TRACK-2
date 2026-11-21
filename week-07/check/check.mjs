@@ -14,6 +14,8 @@
 //  7. 가게 자세히: 별점 분포, 많이 시킨 메뉴
 //  8. 내 프로필: 어떤 가게에 어떤 리뷰를 남겼는지, 이름을 고치면 옛 리뷰 이름도 바뀌는지
 //  8-1. 로그인한 상태면 "로그인 자리"가 [로그아웃] 단추로 바뀌고, 누르면 원래 자리로 돌아오는지 (로그인 자체는 아직 없음)
+//  8-2. 가게 주인: 내 가게 등록(리뷰가 없는 가게도), 한 가게에 주인 한 명, 사장님 답글 표시,
+//       댓글 좋아요/싫어요(한 사람 한 번, 내 댓글에는 못 누름), 사장님 매너온도 계산
 //  9. 저장: 다시 열어도 남는지, 저장 공간이 가득 차면 까닭을 알려 주고 되돌리는지, 저장 코드가 store.js 한곳에만 있는지
 // 10. 이상한 글(HTML 태그)이 그대로 글자로 보이는지
 // 11. 폰 · 태블릿 · 컴퓨터 화면 폭(320~1920)에서 잘리거나 옆으로 밀리지 않는지
@@ -416,6 +418,149 @@ try {
   await openApp({ keep: true });
   check(await js(`!document.getElementById("logout-btn")`), "다시 열어도 로그아웃한 상태가 유지됨", "다시 열면 로그아웃 단추가 또 나옴");
 
+  // 8-2. 가게 주인 · 매너온도
+  console.log("[가게 주인 · 사장님 답글 · 좋아요/싫어요 · 매너온도]");
+  const K = (n) => "#/shop/" + encodeURIComponent(n);
+  const ownerOf = (who) => ({ name: "골목 치킨", registeredAt: T0, owner: who });
+  // (a) 프로필이 없을 때
+  await openApp({ seed: { ...seedData(photoUrl), profile: null }, hash: K("행복 분식") });
+  check(await js(`!document.getElementById("claim-btn") && document.getElementById("owner-box").innerText.includes("프로필을 만든 뒤")`),
+    "프로필이 없으면 [내 가게로 등록하기] 대신 \"프로필을 만든 뒤 등록할 수 있어요\" 안내가 보임", "프로필 없을 때 주인 칸이 이상함");
+  check(await js(`(() => { const b = [...document.querySelectorAll(".react-btn")]; return b.length > 0 && b.every((x) => x.disabled); })()`),
+    "프로필이 없으면 좋아요/싫어요 단추가 숫자만 보이고 눌러지지 않음", "프로필 없는데 좋아요 단추가 눌러짐");
+
+  // (b) 내 가게로 등록하기 (리뷰가 이미 있는 가게)
+  await openApp({ seed: seedData(photoUrl), hash: K("골목 치킨") });
+  check(await js(`!!document.getElementById("claim-btn") && !document.querySelector(".temp-num")`), "주인이 없는 가게에는 [내 가게로 등록하기] 단추가 보임", "등록 단추가 없음");
+  await shot("8-2-가게등록전");
+  await click("#claim-btn");
+  d = await js(`({ name: ${Q(".owner-name")}?.innerText, badge: ${Q("#owner-box .badge")}?.innerText, temp: ${Q(".temp-num")}?.innerText, btn: !!document.getElementById("claim-btn"),
+    mine: document.getElementById("owner-box").innerText.includes("내 가게예요"), form: ${Q(".c-form input")}.placeholder, send: ${Q(".c-form button")}.innerText })`);
+  check(d.name === "맛객" && d.badge === "사장님" && d.temp === "36.5°C" && !d.btn && d.mine,
+    `등록하면 사장님 ${d.name} · ${d.badge} · 매너온도 ${d.temp} 로 바뀌고 단추는 사라짐`, "등록한 뒤: " + JSON.stringify(d));
+  check(d.form.includes("사장님 답글") && d.send === "답글 달기", "내 가게 리뷰에는 댓글 칸이 \"사장님 답글\" / [답글 달기] 로 바뀜", "사장님 댓글 칸: " + JSON.stringify(d));
+  await shot("8-2-가게등록후");
+  st = await stored();
+  check(st.owners?.["골목 치킨"]?.owner.id === "me-1", "주인 등록이 이 기기에 저장됨", "저장된 주인: " + JSON.stringify(st.owners));
+  const again = await js(`[Store.registerShop("골목  치킨").message, Store.registerShop("  골목 치킨 ").ok]`);
+  check(again[0].includes("이미 내 가게") && again[1] === false, "같은 가게를 또 등록하려 하면 막힘 (띄어쓰기가 달라도 같은 가게): \"" + again[0] + "\"", "다시 등록: " + JSON.stringify(again));
+  await openApp({ keep: true, hash: K("골목 치킨") });
+  check((await text(".owner-name")) === "맛객", "다시 열어도 내 가게로 남아 있음", "다시 연 뒤 주인: " + (await text(".owner-name")));
+
+  // (c) 남의 가게
+  const sdC = seedData(photoUrl);
+  sdC.owners = { "행복 분식": { name: "행복 분식", registeredAt: T0, owner: other("사장님A", "🧑") } };
+  await openApp({ seed: sdC, hash: K("행복 분식") });
+  d = await js(`({ claim: !!document.getElementById("claim-btn"), name: ${Q(".owner-name")}.innerText, ph: ${Q(".c-form input")}.placeholder, send: ${Q(".c-form button")}.innerText })`);
+  check(!d.claim && d.name === "사장님A" && d.ph === "댓글을 남겨 보세요" && d.send === "달기", "남의 가게에는 등록 단추가 없고, 나는 그대로 일반 댓글을 달 수 있음", "남의 가게: " + JSON.stringify(d));
+  const steal = await js(`Store.registerShop("행복 분식")`);
+  check(steal.ok === false && steal.message.includes("이미 주인이 등록된"), "이미 주인이 있는 가게는 다른 사람이 등록할 수 없음: \"" + steal.message + "\"", "남의 가게 등록: " + JSON.stringify(steal));
+  await setVal(".review .c-form input", "저도 손님이에요");
+  await submit(".review .c-form");
+  st = await stored();
+  const plain = st.reviews.flatMap((r) => r.comments).find((c) => c.text === "저도 손님이에요");
+  check(plain && plain.owner === false && !(await js(`[...document.querySelectorAll(".comment")].some((c) => c.innerText.includes("저도 손님이에요") && c.querySelector(".badge"))`)),
+    "주인이 아닌 사람의 댓글에는 \"사장님\" 표시가 붙지 않음", "일반 댓글 표시가 이상함");
+
+  // (d) 리뷰가 아직 없는 가게 등록 (내 프로필)
+  await openApp({ seed: seedData(photoUrl), hash: "#/me" });
+  check(await js(`!!document.getElementById("no-owned")`), "내 프로필에 \"아직 등록한 내 가게가 없어요\"가 보임", "내 가게 빈 안내가 없음");
+  await submit("#shop-form");
+  check((await text("#shop-msg")).includes("가게 이름"), "이름 없이 등록하면 안내가 나옴: " + (await text("#shop-msg")), "이름 없이 등록됨");
+  await setVal("#shop-form [name=shop]", "새 가게");
+  await submit("#shop-form");
+  await setVal("#shop-form [name=shop]", "행복 분식");
+  await submit("#shop-form");
+  d = await js(`({ items: [...document.querySelectorAll("#owned-list li")].map((li) => li.innerText.replace(/\\s+/g, " ")), temp: ${Q("#owner-panel .temp-num")}.innerText })`);
+  check(d.items.length === 2 && d.items.some((t) => t === "새 가게 아직 리뷰가 없어요") && d.items.some((t) => t === "행복 분식 리뷰 3개 · 평균 4.0점") && d.temp === "36.5°C",
+    "리뷰 없는 새 가게도, 리뷰가 이미 있는 가게도 내 가게로 등록됨: " + d.items.join(" / "), "내 가게 목록: " + JSON.stringify(d));
+  await shot("8-2-내가게");
+  await go("#/");
+  const cardsD = await js(`[...document.querySelectorAll(".shop-card")].map((c) => c.innerText.replace(/\\s+/g, " "))`);
+  const newCard = cardsD.find((t) => t.includes("새 가게"));
+  check(cardsD.length === 5 && newCard?.includes("아직 리뷰가 없어요") && newCard.includes("사장님 등록 · 매너온도 36.5°C") && (await text(".sub")).includes("가게 5곳 · 리뷰 10개"),
+    "목록에 리뷰 없는 새 가게도 카드로 나오고(가게 5곳), \"사장님 등록 · 매너온도\"가 보임", "목록: " + JSON.stringify(cardsD) );
+  await shot("8-2-목록-새가게");
+  await go(K("새 가게"));
+  check(await js(`!!document.getElementById("no-review") && document.querySelectorAll(".review").length === 0 && !!document.querySelector(".owner-name")`),
+    "리뷰 없는 가게 화면도 깨지지 않고 \"아직 리뷰가 없어요\"와 주인이 보임", "리뷰 없는 가게 화면이 이상함");
+  await js(`Store.addReview({ shop: "새 가게", menu: "국수", stars: 5, text: "첫 손님", photo: null }); route();`);
+  check(await js(`!document.getElementById("no-review") && ${Q(".avg-num")}.innerText === "5.0" && document.querySelectorAll(".review").length === 1`),
+    "새 가게에 첫 리뷰가 달리면 평균 5.0 으로 바뀜", "첫 리뷰 뒤 화면이 이상함");
+
+  // (e) 사장님 답글 + 매너온도 계산
+  const sdE = seedData(photoUrl);
+  sdE.owners = { "골목 치킨": ownerOf({ ...me }) };
+  await openApp({ seed: sdE, hash: K("골목 치킨") });
+  const reviewIds = await js(`[...document.querySelectorAll(".review")].map((r) => r.dataset.id)`);
+  const t0 = await text(".temp-num");
+  await setVal(`.review[data-id="${reviewIds[0]}"] .c-form input`, "방문해 주셔서 감사합니다!");
+  await submit(`.review[data-id="${reviewIds[0]}"] .c-form`);
+  d = await js(`({ badge: !!document.querySelector('.review[data-id="${reviewIds[0]}"] .comment.by-owner .badge'), temp: ${Q(".temp-num")}.innerText, detail: ${Q(".temp-detail")}.innerText })`);
+  check(t0 === "36.5°C" && d.badge && d.temp === "37.0°C" && d.detail.startsWith("답글 단 리뷰 1개"),
+    `사장님 답글에 "사장님" 표시가 붙고, 리뷰 1개에 답글을 달면 매너온도 ${t0} → ${d.temp} (+0.5)`, `답글 뒤: ${t0} → ${JSON.stringify(d)}`);
+  await setVal(`.review[data-id="${reviewIds[0]}"] .c-form input`, "또 오세요");
+  await submit(`.review[data-id="${reviewIds[0]}"] .c-form`);
+  check((await text(".temp-num")) === "37.0°C", "같은 리뷰에 답글을 또 달아도 매너온도는 그대로 37.0°C (답글 도배 막기)", "같은 리뷰 두 번째 답글: " + (await text(".temp-num")));
+  await setVal(`.review[data-id="${reviewIds[1]}"] .c-form input`, "다음엔 더 빨리 낼게요");
+  await submit(`.review[data-id="${reviewIds[1]}"] .c-form`);
+  check((await text(".temp-num")) === "37.5°C", "다른 리뷰에 답글을 달면 37.5°C", "다른 리뷰 답글: " + (await text(".temp-num")));
+  await shot("8-2-사장님답글");
+  st = await stored();
+  check(st.reviews.flatMap((r) => r.comments).filter((c) => c.owner).length === 3, "사장님 답글 3개가 \"사장님 답글\"로 저장됨 (owner: true)", "저장된 사장님 답글 수가 이상함");
+
+  // (f) 좋아요 / 싫어요
+  const sdF = seedData(photoUrl);
+  const rF = sdF.reviews[0];                                    // 골목 치킨, 지민의 리뷰
+  rF.comments = [
+    { id: "cr", text: "사장님 답글입니다", createdAt: T0 + 10 * DAY, author: { ...me }, owner: true, likes: ["o-a", "o-b"], dislikes: ["o-c"] },
+    { id: "cj", text: "지민의 댓글", createdAt: T0 + 10 * DAY, author: other("지민"), owner: false, likes: [], dislikes: [] },
+  ];
+  sdF.owners = { "골목 치킨": ownerOf({ ...me }) };
+  const asJimin = { ...sdF, profile: other("지민") };
+  await openApp({ seed: asJimin, hash: K("골목 치킨") });
+  const rb = (id, kind) => `.react-btn[data-comment="${id}"][data-kind="${kind}"]`;
+  const react = async () => js(`({ like: ${Q(rb("cr", "like"))}.innerText.trim(), dis: ${Q(rb("cr", "dislike"))}.innerText.trim(), temp: ${Q(".temp-num")}.innerText,
+    onLike: ${Q(rb("cr", "like"))}.classList.contains("on"), onDis: ${Q(rb("cr", "dislike"))}.classList.contains("on") })`);
+  let rx = await react();
+  check(rx.like === "👍 2" && rx.dis === "👎 1" && rx.temp === "37.1°C", `처음: 좋아요 2 · 싫어요 1 → 매너온도 ${rx.temp} (36.5 + 0.5 + 0.4 − 0.3)`, "처음 좋아요: " + JSON.stringify(rx));
+  check(await js(`${Q(rb("cj", "like"))}.disabled && ${Q(rb("cj", "dislike"))}.disabled && !${Q(rb("cr", "like"))}.disabled`), "내 댓글(지민)에는 좋아요/싫어요가 눌러지지 않고, 사장님 답글에는 눌러짐", "내 댓글 단추 상태가 이상함");
+  await click(rb("cr", "like"));
+  rx = await react();
+  check(rx.like === "👍 3" && rx.onLike && rx.temp === "37.3°C", `[좋아요]를 누르면 3 이 되고 매너온도 ${rx.temp} (+0.2)`, "좋아요 누름: " + JSON.stringify(rx));
+  await shot("8-2-좋아요");
+  await click(rb("cr", "like"));
+  rx = await react();
+  check(rx.like === "👍 2" && !rx.onLike && rx.temp === "37.1°C", "한 번 더 누르면 취소되어 2 로 돌아옴 (한 사람 한 번)", "좋아요 취소: " + JSON.stringify(rx));
+  await click(rb("cr", "dislike"));
+  rx = await react();
+  check(rx.dis === "👎 2" && rx.onDis && rx.temp === "36.8°C", `[싫어요]를 누르면 싫어요 2, 매너온도 ${rx.temp} (−0.3)`, "싫어요 누름: " + JSON.stringify(rx));
+  await click(rb("cr", "like"));
+  rx = await react();
+  st = await stored();
+  const crS = st.reviews[0].comments.find((c) => c.id === "cr");
+  check(rx.like === "👍 3" && rx.dis === "👎 1" && rx.temp === "37.3°C" && crS.likes.includes("o-지민") && !crS.dislikes.includes("o-지민"),
+    "싫어요를 누른 뒤 좋아요를 누르면 싫어요는 빠지고 좋아요로 바뀜 (한 사람이 둘 다 누를 수 없음)", "좋아요로 바꿈: " + JSON.stringify(rx));
+  const own = await js(`Store.react(${JSON.stringify(rF.id)}, "cj", "like")`);
+  check(own.ok === false && own.message.includes("내 댓글"), "코드로 억지로 내 댓글에 눌러도 막힘: \"" + own.message + "\"", "내 댓글 좋아요: " + JSON.stringify(own));
+
+  // (g) 사장님 본인 화면: 내 프로필 · 목록 · 이름 바꾸기
+  await openApp({ seed: sdF, hash: "#/me" });
+  d = await js(`({ items: [...document.querySelectorAll("#owned-list li")].map((li) => li.innerText.replace(/\\s+/g, " ")), temp: ${Q("#owner-panel .temp-num")}.innerText, detail: ${Q("#owner-panel .temp-detail")}.innerText })`);
+  check(d.items.join() === "골목 치킨 리뷰 2개 · 평균 2.5점" && d.temp === "37.1°C" && d.detail === "답글 단 리뷰 1개 · 좋아요 2 · 싫어요 1",
+    `내 프로필에 내 가게와 매너온도가 보임: ${d.items[0]} · ${d.temp} (${d.detail})`, "내 프로필 내 가게: " + JSON.stringify(d));
+  await shot("8-2-내프로필-매너온도");
+  await go("#/");
+  check((await js(`${Q(".owner-tag")}.innerText`)).includes("사장님 등록 · 매너온도 37.1°C"), "목록의 가게 카드에도 사장님 매너온도(37.1°C)가 보임", "카드 매너온도: " + (await js(`${Q(".owner-tag")}?.innerText`)));
+  await js(`Store.saveProfile({ name: "사장님새이름", emoji: "🦊", color: "#a0c4ff" })`);
+  st = await stored();
+  check(st.owners["골목 치킨"].owner.name === "사장님새이름" && st.reviews[0].comments.find((c) => c.id === "cr").author.name === "사장님새이름",
+    "프로필 이름을 바꾸면 주인 이름과 사장님 답글의 이름도 같이 바뀜", "이름 바꾼 뒤: " + JSON.stringify(st.owners));
+
+  // (h) 이상한 저장 내용에도 안 깨지는지
+  await openApp({ seed: { ...seedData(null), owners: { "x": "이상함", "y": { name: "", owner: {} }, "z": null }, reviews: seedData(null).reviews.map((r) => ({ ...r, comments: r.comments.map((c) => ({ ...c, likes: "이상함", dislikes: [1, null, "a"] })) })) }, hash: "#/" });
+  check(await js(`document.querySelectorAll(".shop-card").length === 4`), "주인 · 좋아요 칸에 이상한 값이 들어 있어도 화면이 그대로 나옴", "이상한 저장 내용에서 화면이 깨짐");
+
   // 10. 이상한 글
   console.log("[이상한 글]");
   const evil = seedData(null);
@@ -435,6 +580,12 @@ try {
     rev("아주아주아주아주긴가게이름아주아주아주아주긴가게이름", "엄청나게긴메뉴이름엄청나게긴메뉴이름엄청나게긴", 5, "ㅋ".repeat(150) + " https://example.com/" + "a".repeat(120), { id: "o-x", name: "열두글자이름열두글자이름", emoji: "🦁", color: "#ffc6ff" }, 10, {
       photo: photoUrl, comments: [{ id: "cl", text: "b".repeat(180), createdAt: T0, author: other("지민") }] }),
   );
+  const lo2 = { id: "o-x", name: "열두글자이름열두글자이름", emoji: "🦁", color: "#ffc6ff" };
+  long.owners = {
+    [Store_key(long.reviews[0].shop)]: { name: long.reviews[0].shop, registeredAt: T0, owner: lo2 },
+    "등록만한가게이름등록만한가게이름등록만한가게이름": { name: "등록만한가게이름등록만한가게이름등록만한가게이름", registeredAt: T0, owner: { ...lo2, id: "o-y" } },
+  };
+  long.reviews[0].comments.push({ id: "cown", text: "c".repeat(150), createdAt: T0, author: lo2, owner: true, likes: ["o-a", "o-b"], dislikes: ["o-c"] });
   const SIZES = [[320, 568, true, "작은 폰"], [390, 844, true, "폰"], [768, 1024, true, "태블릿"], [1280, 800, false, "노트북"], [1920, 1080, false, "큰 모니터"]];
   const FIT = `(() => {
     const W = document.documentElement.clientWidth, out = [];

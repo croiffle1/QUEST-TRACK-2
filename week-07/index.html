@@ -127,6 +127,20 @@
   .my-review .top-line { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
   .my-photo { width: 120px; border-radius: 8px; display: block; }
 
+  /* 가게 주인 · 매너온도 */
+  .badge { display: inline-block; background: var(--brand); color: var(--brand-ink); border-radius: 999px; padding: 0 9px; font-size: .78rem; font-weight: 700; line-height: 1.6; }
+  .owner-box { background: var(--soft); border-radius: 12px; padding: 12px; display: grid; gap: 8px; }
+  .owner-box .who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+  .temp { display: grid; gap: 4px; }
+  .temp-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .temp-num { font-size: 1.4rem; }
+  .temp-bar { background: #fff; max-width: 320px; }
+  .temp-bar > span { background: var(--brand); }
+  .react { display: flex; gap: 6px; margin-top: 4px; }
+  .react-btn { font: inherit; font-size: .88rem; min-height: 36px; padding: 2px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+  .react-btn.on { border-color: var(--brand); background: var(--soft); font-weight: 700; }
+  .react-btn[disabled] { opacity: .65; cursor: default; }
+  .owned-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); background: #2b2118; color: #fff; padding: 10px 16px; border-radius: 12px; font-weight: 600; z-index: 10; }
   #toast[hidden] { display: none; }
 </style>
@@ -180,6 +194,25 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
 }
 
+// 사장님 매너온도: 기본 36.5°C. 서로 다른 리뷰에 사장님 답글을 달면 리뷰마다 +0.5,
+// 내 답글에 좋아요 +0.2, 싫어요 -0.3. 0 ~ 99.9 사이. (같은 리뷰에 답글을 여러 번 달아도 한 번만 셈)
+function mannerOf(ownerId) {
+  let replied = 0, likes = 0, dislikes = 0;
+  for (const r of Store.getReviews()) {
+    const mine = r.comments.filter((c) => c.owner && c.author.id === ownerId);
+    if (mine.length) replied++;
+    for (const c of mine) { likes += c.likes.length; dislikes += c.dislikes.length; }
+  }
+  const t = Math.min(99.9, Math.max(0, 36.5 + replied * 0.5 + likes * 0.2 - dislikes * 0.3));
+  return { temp: Math.round(t * 10) / 10, replied, likes, dislikes };
+}
+function tempHTML(ownerId) {
+  const m = mannerOf(ownerId), face = m.temp < 30 ? "🥶" : m.temp < 36.5 ? "🙂" : m.temp < 45 ? "😊" : "🔥";
+  return `<div class="temp"><div class="temp-top"><span aria-hidden="true">${face}</span><b class="temp-num">${m.temp.toFixed(1)}°C</b><span class="count">사장님 매너온도</span></div>
+    <div class="bar temp-bar"><span style="width:${Math.min(100, m.temp)}%"></span></div>
+    <p class="count temp-detail">답글 단 리뷰 ${m.replied}개 · 좋아요 ${m.likes} · 싫어요 ${m.dislikes}</p></div>`;
+}
+
 // 리뷰들을 가게별로 묶고 평균 · 별점 분포 · 인기 메뉴를 셈한다
 function groupShops() {
   const map = new Map();
@@ -192,8 +225,13 @@ function groupShops() {
     const m = s.menus.get(mk) || { name: r.menu, count: 0, sum: 0 };
     m.name = r.menu; m.count++; m.sum += r.stars; s.menus.set(mk, m);
   }
+  const owners = Store.getOwners();
+  for (const [key, o] of Object.entries(owners))       // 주인이 등록만 하고 아직 리뷰가 없는 가게
+    if (!map.has(key)) map.set(key, { key, name: o.name, reviews: [], sum: 0, dist: [0, 0, 0, 0, 0], menus: new Map() });
   for (const s of map.values()) {
-    s.count = s.reviews.length; s.avg = s.sum / s.count; s.last = Math.max(...s.reviews.map((r) => r.createdAt));
+    s.owner = owners[s.key] || null;
+    s.count = s.reviews.length; s.avg = s.count ? s.sum / s.count : 0;
+    s.last = s.count ? Math.max(...s.reviews.map((r) => r.createdAt)) : (s.owner ? s.owner.registeredAt : 0);
     s.photo = (s.reviews.find((r) => r.photo) || {}).photo || null;
     s.popular = [...s.menus.values()].sort((a, b) => b.count - a.count || b.sum / b.count - a.sum / a.count);
   }
@@ -238,13 +276,13 @@ window.addEventListener("storage", () => {
 
 // ── 1. 맛집 목록: 검색 · 별점 거르기 · 순서 ──
 function viewHome() {
-  const n = groupShops().length, m = Store.getReviews().length;
+  const n = groupShops().length, m = Store.getReviews().length, has = m > 0 || n > 0;
   view.innerHTML = `
     <section class="intro">
       <h1>우리 동네 맛집 평점판</h1>
-      <p class="sub">${m ? `가게 ${n}곳 · 리뷰 ${m}개` : "가게마다 별점과 한 줄 평을 남겨 보세요."}</p>
+      <p class="sub">${has ? `가게 ${n}곳 · 리뷰 ${m}개` : "가게마다 별점과 한 줄 평을 남겨 보세요."}</p>
     </section>
-    ${m ? `
+    ${has ? `
     <div class="row panel">
       <label class="field grow"><span>가게나 메뉴 찾기</span><input id="q" type="search" placeholder="가게 이름이나 메뉴" value="${esc(ui.q)}"></label>
       <label class="field"><span>평균 별점</span>
@@ -259,7 +297,7 @@ function viewHome() {
       <p>아직 리뷰가 없어요. 첫 리뷰를 남겨 보세요!</p>
       <a class="btn primary" href="#/write">리뷰 쓰기</a>
     </div>`}`;
-  if (m) paintShops();
+  if (has) paintShops();
 }
 function paintShops() {
   const q = ui.q.trim().toLowerCase();
@@ -277,22 +315,33 @@ function paintShops() {
       <div class="thumb">${s.photo ? `<img src="${s.photo}" alt="" loading="lazy">` : "🍽️"}</div>
       <div class="card-body">
         <h2 class="shop-name">${esc(s.name)}</h2>
-        <p class="rating">${stars(s.avg)} <b class="avg-num">${s.avg.toFixed(1)}</b> <span class="count">리뷰 ${s.count}개</span></p>
-        <p class="menus">많이 시킨 메뉴: ${esc(s.popular[0].name)}</p>
-        ${s.reviews[0].text ? `<p class="snippet">“${esc(s.reviews[0].text)}”</p>` : ""}
+        ${s.count ? `<p class="rating">${stars(s.avg)} <b class="avg-num">${s.avg.toFixed(1)}</b> <span class="count">리뷰 ${s.count}개</span></p>`
+          : `<p class="rating"><span class="count">아직 리뷰가 없어요</span></p>`}
+        ${s.owner ? `<p class="menus owner-tag">🏷️ 사장님 등록 · 매너온도 ${mannerOf(s.owner.owner.id).temp.toFixed(1)}°C</p>` : ""}
+        ${s.popular.length ? `<p class="menus">많이 시킨 메뉴: ${esc(s.popular[0].name)}</p>` : ""}
+        ${s.count && s.reviews[0].text ? `<p class="snippet">“${esc(s.reviews[0].text)}”</p>` : ""}
       </div>
     </a>`).join("") : `<div class="panel empty" id="no-match" style="grid-column:1/-1"><p>맞는 가게가 없어요. 찾는 말이나 별점을 바꿔 보세요.</p></div>`;
 }
 
 // ── 가게 자세히: 평균 · 별점 분포 · 인기 메뉴 · 리뷰와 댓글 ──
+function reactBtn(r, c, kind) {
+  const prof = Store.getProfile(), arr = kind === "like" ? c.likes : c.dislikes;
+  const mine = !!prof && arr.includes(prof.id), off = !prof || c.author.id === prof.id;   // 프로필이 없거나 내 댓글이면 누를 수 없음
+  return `<button type="button" class="react-btn${mine ? " on" : ""}" data-review="${esc(r.id)}" data-comment="${esc(c.id)}" data-kind="${kind}" aria-pressed="${mine}"
+    aria-label="${kind === "like" ? "좋아요" : "싫어요"} ${arr.length}개"${off ? " disabled" : ""}>${kind === "like" ? "👍" : "👎"} <span class="n">${arr.length}</span></button>`;
+}
 function reviewHTML(r) {
+  const prof = Store.getProfile(), shopOwner = Store.getOwners()[Store.shopKey(r.shop)];
+  const isOwner = !!(prof && shopOwner && shopOwner.owner.id === prof.id);
   const comments = r.comments.map((c) => `
-    <li class="comment">${avatar(c.author, "sm")}
-      <div><p class="c-head"><b>${esc(c.author.name)}</b> <time>${fmtDate(c.createdAt)}</time></p><p class="c-text">${esc(c.text)}</p></div></li>`).join("");
-  const form = Store.getProfile()
+    <li class="comment${c.owner ? " by-owner" : ""}">${avatar(c.author, "sm")}
+      <div><p class="c-head"><b>${esc(c.author.name)}</b>${c.owner ? ` <span class="badge">사장님</span>` : ""} <time>${fmtDate(c.createdAt)}</time></p><p class="c-text">${esc(c.text)}</p>
+        <div class="react">${reactBtn(r, c, "like")}${reactBtn(r, c, "dislike")}</div></div></li>`).join("");
+  const form = prof
     ? `<form class="c-form" data-review="${esc(r.id)}" novalidate>
-         <input name="text" maxlength="200" placeholder="댓글을 남겨 보세요" aria-label="댓글">
-         <button class="btn small" type="submit">달기</button></form>`
+         <input name="text" maxlength="200" placeholder="${isOwner ? "사장님 답글을 남겨 보세요" : "댓글을 남겨 보세요"}" aria-label="${isOwner ? "사장님 답글" : "댓글"}">
+         <button class="btn small" type="submit">${isOwner ? "답글 달기" : "달기"}</button></form>`
     : `<p class="hint"><a href="#/me">내 프로필</a>을 만들면 댓글을 달 수 있어요.</p>`;
   return `
     <article class="review" data-id="${esc(r.id)}">
@@ -314,19 +363,27 @@ function viewShop(key) {
     view.innerHTML = `<a class="back" href="#/">← 맛집 목록</a><div class="panel empty"><p>그 가게를 찾지 못했어요.</p><a class="btn primary" href="#/">맛집 목록으로</a></div>`;
     return;
   }
-  const max = Math.max(...s.dist, 1);
+  const max = Math.max(...s.dist, 1), prof = Store.getProfile();
+  const ownerBox = s.owner
+    ? `<div class="owner-box" id="owner-box"><p class="who">${avatar(s.owner.owner, "sm")}<b class="owner-name">${esc(s.owner.owner.name)}</b><span class="badge">사장님</span>${prof && prof.id === s.owner.owner.id ? `<span class="hint">내 가게예요</span>` : ""}</p>${tempHTML(s.owner.owner.id)}</div>`
+    : prof
+      ? `<div class="owner-box" id="owner-box"><p class="hint">이 가게의 주인이세요?</p><div><button type="button" class="btn small" id="claim-btn" data-shop="${esc(s.name)}">내 가게로 등록하기</button></div>
+           <p class="hint">지금은 이 기기에서 누구나 등록할 수 있어요. 진짜 주인인지 확인하는 건 로그인을 붙인 뒤에 해요.</p></div>`
+      : `<p class="hint" id="owner-box">가게 주인이라면 <a href="#/me">내 프로필</a>을 만든 뒤 이 가게를 등록할 수 있어요.</p>`;
   view.innerHTML = `
     <div id="shop-detail">
     <a class="back" href="#/">← 맛집 목록</a>
     <section class="panel shop-head">
       <h1 class="shop-name">${esc(s.name)}</h1>
-      <div class="avg-big">${stars(s.avg)}<b class="avg-num">${s.avg.toFixed(1)}</b><span class="count">리뷰 ${s.count}개</span></div>
+      ${s.count ? `<div class="avg-big">${stars(s.avg)}<b class="avg-num">${s.avg.toFixed(1)}</b><span class="count">리뷰 ${s.count}개</span></div>`
+        : `<p class="sub" id="no-review">아직 리뷰가 없어요. 첫 리뷰를 남겨 보세요!</p>`}
+      ${ownerBox}
       <div class="sum-grid">
         <div><h3>별점 분포</h3>
           ${[5, 4, 3, 2, 1].map((n) => `<div class="dist-row" data-star="${n}"><span>${n}점</span><div class="bar"><span style="width:${(s.dist[n - 1] / max) * 100}%"></span></div><span class="num">${s.dist[n - 1]}</span></div>`).join("")}
         </div>
         <div><h3>많이 시킨 메뉴</h3>
-          <ul class="pop">${s.popular.slice(0, 5).map((m) => `<li><b>${esc(m.name)}</b><span class="count">${m.count}번 · 평균 ${(m.sum / m.count).toFixed(1)}점</span></li>`).join("")}</ul>
+          <ul class="pop">${s.popular.length ? s.popular.slice(0, 5).map((m) => `<li><b>${esc(m.name)}</b><span class="count">${m.count}번 · 평균 ${(m.sum / m.count).toFixed(1)}점</span></li>`).join("") : `<li class="count">아직 없어요</li>`}</ul>
         </div>
       </div>
     </section>
@@ -419,6 +476,21 @@ function viewMe() {
         </section>`; }).join("")
       : `<div class="panel empty" id="no-mine"><p>아직 남긴 리뷰가 없어요.</p><a class="btn primary" href="#/write">첫 리뷰 쓰기</a></div>`}`;
   }
+  let owned = "";
+  if (me) {
+    const mineShops = groupShops().filter((x) => x.owner && x.owner.owner.id === me.id);
+    owned = `
+    <section class="panel form" id="owner-panel">
+      <h2>내 가게</h2>
+      <form id="shop-form" class="row" novalidate>
+        <label class="field grow"><span>가게 등록하기</span><input name="shop" maxlength="30" autocomplete="off" placeholder="가게 이름"></label>
+        <button class="btn primary" type="submit">내 가게로 등록</button></form>
+      <p class="msg" id="shop-msg" role="alert"></p>
+      <p class="hint">리뷰가 이미 있는 가게도 이름을 똑같이 적으면 내 가게가 돼요. 지금은 이 기기에서 누구나 등록할 수 있고, 진짜 주인인지 확인하는 건 로그인을 붙인 뒤에 해요.</p>
+      ${mineShops.length ? `<ul class="owned-list" id="owned-list">${mineShops.map((x) => `<li><a href="#/shop/${encodeURIComponent(x.key)}">${esc(x.name)}</a> <span class="count">${x.count ? `리뷰 ${x.count}개 · 평균 ${x.avg.toFixed(1)}점` : "아직 리뷰가 없어요"}</span></li>`).join("")}</ul>${tempHTML(me.id)}`
+        : `<p class="hint" id="no-owned">아직 등록한 내 가게가 없어요.</p>`}
+    </section>`;
+  }
   view.innerHTML = `
     <h1>내 프로필</h1>
     <form id="profile-form" class="panel form" novalidate>
@@ -431,7 +503,7 @@ function viewMe() {
       <p class="msg" id="form-msg" role="alert"></p>
       <div><button class="btn primary" type="submit">${me ? "프로필 고치기" : "프로필 만들기"}</button></div>
     </form>
-    ${mine}`;
+    ${owned}${mine}`;
   paintProfile();
 }
 function paintProfile() {
@@ -449,6 +521,18 @@ view.addEventListener("click", (e) => {
   if (em) { pdraft.emoji = em.dataset.emoji; paintProfile(); return; }
   const co = e.target.closest(".color-btn");
   if (co) { pdraft.color = co.dataset.color; paintProfile(); return; }
+  const rb = e.target.closest(".react-btn");
+  if (rb) {
+    const y = window.scrollY, res = Store.react(rb.dataset.review, rb.dataset.comment, rb.dataset.kind);
+    if (!res.ok) { toast(res.message); return; }
+    route(true); window.scrollTo(0, y); return;
+  }
+  const claim = e.target.closest("#claim-btn");
+  if (claim) {
+    const res = Store.registerShop(claim.dataset.shop);
+    if (!res.ok) { toast(res.message); return; }
+    toast("내 가게로 등록했어요."); route(true); return;
+  }
   if (e.target.closest(".photo-clear")) { wdraft.photo = null; $("#photo").value = ""; paintPhoto(); }
 });
 view.addEventListener("input", (e) => {
@@ -473,6 +557,7 @@ view.addEventListener("submit", (e) => {
   const f = e.target;
   if (f.id === "write-form") sendReview(f);
   else if (f.id === "profile-form") sendProfile(f);
+  else if (f.id === "shop-form") sendShop(f);
   else if (f.classList.contains("c-form")) sendComment(f);
 });
 function sendReview(f) {
@@ -493,6 +578,11 @@ function sendProfile(f) {
   if (!res.ok) { $("#form-msg").textContent = res.message; toast(res.message); return; }
   toast("프로필을 저장했어요.");
   route(true);
+}
+function sendShop(f) {
+  const res = Store.registerShop(f.elements.shop.value);
+  if (!res.ok) { $("#shop-msg").textContent = res.message; return; }
+  toast("내 가게로 등록했어요."); route(true);
 }
 function sendComment(f) {
   const text = f.elements.text.value.trim();
