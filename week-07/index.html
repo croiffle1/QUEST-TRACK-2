@@ -23,8 +23,8 @@
   .top { background: var(--card); border-bottom: 1px solid var(--line); }
   .top-in { max-width: 960px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
   .brand { font-weight: 800; font-size: 1.2rem; color: var(--brand); text-decoration: none; margin-right: auto; }
-  .login-slot { order: 1; border: 2px dashed var(--field); border-radius: 999px; padding: 4px 14px; color: var(--muted); font-size: .95rem; white-space: nowrap; }
-  .login-slot.on { border-style: solid; padding: 0; border-color: transparent; }
+  .login-slot { order: 1; color: var(--muted); font-size: .95rem; white-space: nowrap; cursor: default; user-select: none; }
+  .login-slot.on { cursor: auto; user-select: auto; }
   .login-slot .btn { min-height: 40px; padding: 4px 16px; }
   .nav { order: 2; width: 100%; display: flex; gap: 8px; }
   .nav a { flex: 1 1 0; text-align: center; padding: 10px 6px; border-radius: 10px; text-decoration: none; font-weight: 700; color: var(--brand); background: var(--soft); }
@@ -155,6 +155,18 @@
   .react-btn[disabled] { opacity: .7; cursor: default; }
   .owned-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 
+  /* 처음 온 사람을 위한 안내 · 가게 고르기 · 고치기/지우기 */
+  .steps { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; text-align: left; color: var(--ink); }
+  .shop-help { display: grid; gap: 8px; }
+  .shop-hint { background: var(--soft); border-radius: 10px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .shop-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pick-shop { font: inherit; font-size: .95rem; font-weight: 700; min-height: 40px; padding: 4px 14px; border-radius: 999px; border: 1px solid var(--field); background: #fff; color: var(--brand); cursor: pointer; max-width: 100%; text-align: left; }
+  .r-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  details.panel > summary { cursor: pointer; font-weight: 800; color: var(--brand); font-size: 1.05rem; min-height: 44px; display: flex; align-items: center; }
+  details.panel[open] > summary { margin-bottom: 12px; }
+  .temp-help summary { cursor: pointer; color: var(--brand); font-weight: 700; font-size: .95rem; min-height: 40px; display: flex; align-items: center; }
+  .temp-help p { color: var(--muted); font-size: .95rem; }
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 12px; font-weight: 600; z-index: 10; }
   #toast[hidden] { display: none; }
 </style>
@@ -224,7 +236,10 @@ function tempHTML(ownerId) {
   const m = mannerOf(ownerId);
   return `<div class="temp"><div class="temp-top"><b class="temp-num">${m.temp.toFixed(1)}°C</b><span class="count">사장님 매너온도</span></div>
     <div class="bar temp-bar"><span style="width:${Math.min(100, m.temp)}%"></span></div>
-    <p class="count temp-detail">답글 단 리뷰 ${m.replied}개 · 좋아요 ${m.likes} · 싫어요 ${m.dislikes}</p></div>`;
+    <p class="count temp-detail">답글 단 리뷰 ${m.replied}개 · 좋아요 ${m.likes} · 싫어요 ${m.dislikes}</p>
+    <details class="temp-help"><summary>매너온도가 뭐예요?</summary>
+      <p>가게 사장님이 손님 리뷰에 얼마나 잘 답해 주는지 보여 주는 온도예요. 기본은 36.5°C 예요.</p>
+      <p>서로 다른 리뷰에 답글을 달 때마다 0.5 오르고, 그 답글에 손님이 좋아요를 누르면 0.2씩 더 올라요. 싫어요를 받으면 0.3씩 내려가요.</p></details></div>`;
 }
 
 // 리뷰들을 가게별로 묶고 평균 · 별점 분포 · 인기 메뉴를 셈한다
@@ -274,8 +289,8 @@ function route(keepScroll = false) {
   const dec = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
   let nav = "home";
   if (parts[0] === "shop" && parts[1]) viewShop(dec(parts[1]));
-  else if (parts[0] === "write") { nav = "write"; viewWrite(new URLSearchParams(qs).get("shop") || ""); }
-  else if (parts[0] === "me") { nav = "me"; viewMe(); }
+  else if (parts[0] === "write") { const q = new URLSearchParams(qs); nav = "write"; viewWrite(q.get("shop") || "", q.get("edit") || ""); }
+  else if (parts[0] === "me") { const q = new URLSearchParams(qs); nav = "me"; viewMe(q.get("next") || "", q.get("shop") || ""); }
   else viewHome();
   $$(".nav a").forEach((a) => (a.dataset.nav === nav ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   document.title = "동네 맛집 평점판";
@@ -309,7 +324,8 @@ function viewHome() {
     <div id="shop-list" class="grid"></div>` : `
     <div class="panel empty" id="empty-all">
       <p>아직 리뷰가 없어요. 첫 리뷰를 남겨 보세요!</p>
-      <a class="btn primary" href="#/write">리뷰 쓰기</a>
+      <ol class="steps"><li>내 프로필 만들기${Store.getProfile() ? " (완료)" : ""}</li><li>리뷰 남기기 (가게 · 메뉴 · 별점 · 한 줄 평)</li></ol>
+      ${Store.getProfile() ? `<a class="btn primary" href="#/write">리뷰 쓰기</a>` : `<a class="btn primary" href="#/me?next=write">프로필 만들고 리뷰 쓰기</a>`}
     </div>`}`;
   if (has) paintShops();
 }
@@ -354,6 +370,7 @@ function togglePhoto(el) {
   $(".photo-hint", el).textContent = photoHint(open);
   $(".photo-slot", el).innerHTML = open ? `<img class="r-photo" src="${r.photo}" alt="${esc(r.shop)} ${esc(r.menu)} 사진" loading="lazy">` : "";
 }
+const actionsHTML = (r) => `<a class="btn small edit-btn" href="#/write?edit=${encodeURIComponent(r.id)}">고치기</a><button type="button" class="btn small del-btn" data-id="${esc(r.id)}">지우기</button>`;
 function reactBtn(r, c, kind) {
   const prof = Store.getProfile(), arr = kind === "like" ? c.likes : c.dislikes;
   const mine = !!prof && arr.includes(prof.id), off = !prof || c.author.id === prof.id;   // 프로필이 없거나 내 댓글이면 누를 수 없음
@@ -376,12 +393,13 @@ function reviewHTML(r) {
     <article class="review" data-id="${esc(r.id)}">
       <div class="r-main${photoAttrs(r)}">
         <header class="r-head">${avatar(r.author)}
-          <div class="r-who"><b class="r-name">${esc(r.author.name)}</b><time>${fmtDate(r.createdAt)}</time></div>
+          <div class="r-who"><b class="r-name">${esc(r.author.name)}</b><time>${fmtDate(r.createdAt)}${r.editedAt ? " · 고침" : ""}</time></div>
           <div class="r-stars">${stars(r.stars)}</div></header>
         <p><span class="chip r-menu">${esc(r.menu)}</span></p>
         ${r.text ? `<p class="r-text">${esc(r.text)}</p>` : ""}
         ${r.photo ? photoHTML(r, openPhotos.has(r.id)) : ""}
       </div>
+      ${prof && r.author.id === prof.id ? `<div class="r-actions">${actionsHTML(r)}</div>` : ""}
       <section class="comments" aria-label="댓글">
         <h3 class="c-count">댓글 ${r.comments.length}개</h3>
         ${comments ? `<ul>${comments}</ul>` : ""}${form}
@@ -425,35 +443,59 @@ function viewShop(key) {
 }
 
 // ── 2. 리뷰 쓰기: 가게 · 메뉴 · 별점 · 글 · 사진 ──
-function viewWrite(shopName) {
-  wdraft = { stars: 0, photo: null, busy: false };
-  if (!Store.getProfile()) {
+// 글자만 같고 띄어쓰기만 다른 가게 (예: 행복분식 / 행복 분식) 찾기
+const compactKey = (n) => Store.shopKey(n).replace(/\s/g, "");
+function findLookalike(name, shops) {
+  if (!name) return null;
+  return shops.find((x) => x.key !== Store.shopKey(name) && compactKey(x.name) === compactKey(name)) || null;
+}
+function viewWrite(shopName, editId = "") {
+  const me = Store.getProfile();
+  const ed = me && editId ? Store.getReviews().find((r) => r.id === editId && r.author.id === me.id) : null;
+  wdraft = { stars: ed ? ed.stars : 0, photo: ed ? ed.photo : null, busy: false, editId: ed ? ed.id : null };
+  if (!me) {
     view.innerHTML = `<h1>리뷰 쓰기</h1><div class="panel empty" id="need-profile">
       <p>리뷰에는 작성자 이름과 프로필 그림이 같이 남아요.<br>먼저 내 프로필을 만들어 주세요.</p>
-      <a class="btn primary" href="#/me">내 프로필 만들기</a></div>`;
+      <a class="btn primary" href="#/me?next=write${shopName ? "&shop=" + encodeURIComponent(shopName) : ""}">내 프로필 만들기</a></div>`;
     return;
   }
-  const me = Store.getProfile();
-  const names = groupShops().map((s) => s.name);
+  if (editId && !ed) {
+    view.innerHTML = `<h1>리뷰 고치기</h1><div class="panel empty" id="cant-edit"><p>고칠 수 없는 리뷰예요. 내가 쓴 리뷰만 고칠 수 있어요.</p><a class="btn primary" href="#/me">내 프로필로</a></div>`;
+    return;
+  }
+  const names = groupShops().map((x) => x.name);
   view.innerHTML = `
-    <h1>리뷰 쓰기</h1>
+    <h1>${ed ? "리뷰 고치기" : "리뷰 쓰기"}</h1>
     <form id="write-form" class="panel form" novalidate>
       <div class="preview">${avatar(me)}<p>작성자: <b>${esc(me.name)}</b></p></div>
-      <label class="field"><span>가게</span><input name="shop" maxlength="30" list="shop-names" autocomplete="off" placeholder="예: 행복 분식" value="${esc(shopName)}"></label>
+      <div class="field"><label class="field"><span>가게</span><input name="shop" maxlength="30" list="shop-names" autocomplete="off" placeholder="예: 행복 분식" value="${esc(ed ? ed.shop : shopName)}"></label>
+        <div id="shop-help" class="shop-help"></div></div>
       <datalist id="shop-names">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
-      <label class="field"><span>시킨 메뉴</span><input name="menu" maxlength="30" autocomplete="off" placeholder="예: 떡볶이"></label>
+      <label class="field"><span>시킨 메뉴</span><input name="menu" maxlength="30" autocomplete="off" placeholder="예: 떡볶이" value="${esc(ed ? ed.menu : "")}"></label>
       <fieldset><legend>별점</legend>
         <div class="star-pick" role="radiogroup" aria-label="별점">
           ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="star-btn" role="radio" aria-checked="false" aria-label="${n}점" data-v="${n}">★</button>`).join("")}
           <span class="star-word" id="star-word"></span>
         </div></fieldset>
-      <label class="field"><span>리뷰 (한 줄 평도 좋아요)</span><textarea name="text" maxlength="500" placeholder="어떤 점이 좋았나요?"></textarea></label>
+      <label class="field"><span>리뷰 (한 줄 평도 좋아요)</span><textarea name="text" maxlength="500" placeholder="어떤 점이 좋았나요?">${esc(ed ? ed.text : "")}</textarea></label>
       <div class="field"><span>사진 (없어도 돼요)</span>
         <input id="photo" type="file" accept="image/*">
         <div id="photo-box"></div></div>
       <p class="msg" id="form-msg" role="alert"></p>
-      <div><button class="btn primary" type="submit" id="send">리뷰 남기기</button></div>
+      <div class="r-actions"><button class="btn primary" type="submit" id="send">${ed ? "고친 내용 저장" : "리뷰 남기기"}</button>
+        ${ed ? `<a class="btn" href="#/shop/${encodeURIComponent(Store.shopKey(ed.shop))}">그만두기</a>` : ""}</div>
     </form>`;
+  paintStars(); paintPhoto(); paintShopHelp();
+}
+// 가게 칸 아래: 이미 있는 가게 고르기 + 비슷한 이름 알려 주기
+function paintShopHelp() {
+  const box = $("#shop-help"); if (!box) return;
+  const typed = $("#write-form [name=shop]").value.trim().replace(/\s+/g, " "), shops = groupShops();
+  const like = findLookalike(typed, shops), q = compactKey(typed);
+  const picks = shops.filter((x) => !q || compactKey(x.name).includes(q)).sort((x, y) => y.last - x.last).slice(0, 6);
+  box.innerHTML = (like ? `<p class="shop-hint" id="shop-hint" role="status">이미 <b>${esc(like.name)}</b> 가게가 있어요. 같은 가게라면 아래 단추를 눌러 주세요.
+      <button type="button" class="btn small use-shop" data-name="${esc(like.name)}">그 가게에 쓰기</button></p>` : "")
+    + (picks.length ? `<div><p class="hint">이미 있는 가게 (눌러서 고르기)</p><div class="shop-picks">${picks.map((x) => `<button type="button" class="pick-shop" data-name="${esc(x.name)}">${esc(x.name)}</button>`).join("")}</div></div>` : "");
 }
 function paintStars() {
   $$(".star-btn").forEach((b) => {
@@ -479,7 +521,9 @@ async function shrink(file) {
 }
 
 // ── 3. 내 프로필 + 내가 남긴 리뷰 ──
-function viewMe() {
+let pnext = { next: "", shop: "" };          // 프로필을 처음 만든 뒤 어디로 갈지
+function viewMe(next = "", shop = "") {
+  pnext = next === "write" ? { next, shop } : { next: "", shop: "" };
   const me = Store.getProfile();
   pdraft = me ? { emoji: me.emoji, color: me.color } : { emoji: EMOJIS[0], color: COLORS[0] };
   let mine = "";
@@ -503,7 +547,8 @@ function viewMe() {
             <div class="my-review${photoAttrs(r)}"><div class="top-line">${stars(r.stars)} <span class="chip">${esc(r.menu)}</span> <time>${fmtDate(r.createdAt)}</time></div>
               ${r.text ? `<p class="r-text">${esc(r.text)}</p>` : ""}
               ${r.photo ? photoHTML(r, openPhotos.has(r.id)) : ""}
-              ${r.comments.length ? `<p class="count">댓글 ${r.comments.length}개</p>` : ""}</div>`).join("")}
+              ${r.comments.length ? `<p class="count">댓글 ${r.comments.length}개</p>` : ""}
+              <div class="r-actions">${actionsHTML(r)}</div></div>`).join("")}
         </section>`; }).join("")
       : `<div class="panel empty" id="no-mine"><p>아직 남긴 리뷰가 없어요.</p><a class="btn primary" href="#/write">첫 리뷰 쓰기</a></div>`}`;
   }
@@ -511,8 +556,8 @@ function viewMe() {
   if (me) {
     const mineShops = groupShops().filter((x) => x.owner && x.owner.owner.id === me.id);
     owned = `
-    <section class="panel form" id="owner-panel">
-      <h2>내 가게</h2>
+    <details class="panel" id="owner-panel"${mineShops.length ? " open" : ""}>
+      <summary>가게 주인이신가요? 내 가게 등록하기</summary><div class="form">
       <form id="shop-form" class="row" novalidate>
         <label class="field grow"><span>가게 등록하기</span><input name="shop" maxlength="30" autocomplete="off" placeholder="가게 이름"></label>
         <button class="btn primary" type="submit">내 가게로 등록</button></form>
@@ -520,7 +565,7 @@ function viewMe() {
       <p class="hint">리뷰가 이미 있는 가게도 이름을 똑같이 적으면 내 가게가 돼요. 지금은 이 기기에서 누구나 등록할 수 있고, 진짜 주인인지 확인하는 건 로그인을 붙인 뒤에 해요.</p>
       ${mineShops.length ? `<ul class="owned-list" id="owned-list">${mineShops.map((x) => `<li><a href="#/shop/${encodeURIComponent(x.key)}">${esc(x.name)}</a> <span class="count">${x.count ? `리뷰 ${x.count}개 · 평균 ${x.avg.toFixed(1)}점` : "아직 리뷰가 없어요"}</span></li>`).join("")}</ul>${tempHTML(me.id)}`
         : `<p class="hint" id="no-owned">아직 등록한 내 가게가 없어요.</p>`}
-    </section>`;
+    </div></details>`;
   }
   view.innerHTML = `
     <h1>내 프로필</h1>
@@ -547,7 +592,26 @@ function paintProfile() {
 // ── 눌렀을 때 · 쓸 때 · 보낼 때 ──
 view.addEventListener("click", (e) => {
   const pm = e.target.closest(".has-photo");
-  if (pm) { togglePhoto(pm); return; }
+  if (pm && !e.target.closest("a, button")) { togglePhoto(pm); return; }
+  const pickShop = e.target.closest(".pick-shop, .use-shop");
+  if (pickShop) { const inp = $("#write-form [name=shop]"); inp.value = pickShop.dataset.name; paintShopHelp(); $("#write-form [name=menu]").focus(); return; }
+  const del = e.target.closest(".del-btn");
+  if (del) {
+    del.closest(".r-actions").innerHTML = `<span class="hint">이 리뷰와 달린 댓글이 모두 지워지고 되돌릴 수 없어요.</span>
+      <button type="button" class="btn small danger del-yes" data-id="${esc(del.dataset.id)}">지우기</button><button type="button" class="btn small del-no" data-id="${esc(del.dataset.id)}">취소</button>`;
+    return;
+  }
+  const delNo = e.target.closest(".del-no");
+  if (delNo) { const r = Store.getReviews().find((x) => x.id === delNo.dataset.id); if (r) delNo.closest(".r-actions").innerHTML = actionsHTML(r); return; }
+  const delYes = e.target.closest(".del-yes");
+  if (delYes) {
+    const r = Store.getReviews().find((x) => x.id === delYes.dataset.id), key = r && Store.shopKey(r.shop);
+    const res = Store.deleteReview(delYes.dataset.id);
+    if (!res.ok) { toast(res.message); return; }
+    openPhotos.delete(delYes.dataset.id); toast("리뷰를 지웠어요.");
+    if (location.hash.startsWith("#/shop/") && !groupShops().some((x) => x.key === key)) location.hash = "#/"; else route(true);
+    return;
+  }
   const star = e.target.closest(".star-btn");
   if (star) { wdraft.stars = +star.dataset.v; paintStars(); return; }
   const em = e.target.closest(".emoji-btn");
@@ -573,6 +637,7 @@ view.addEventListener("keydown", (e) => {
 });
 view.addEventListener("input", (e) => {
   if (e.target.id === "q") { ui.q = e.target.value; paintShops(); }
+  else if (e.target.closest("#write-form") && e.target.name === "shop") paintShopHelp();
   else if (e.target.closest("#profile-form") && e.target.name === "name") paintProfile();
 });
 view.addEventListener("change", async (e) => {
@@ -598,25 +663,35 @@ view.addEventListener("submit", (e) => {
 });
 function sendReview(f) {
   const msg = $("#form-msg"), v = (n) => f.elements[n].value.trim().replace(/[ \t]+/g, " ");
-  const shop = v("shop"), menu = v("menu"), text = f.elements.text.value.trim();
+  let shop = v("shop"); const menu = v("menu"), text = f.elements.text.value.trim();
   const problem = !shop ? "가게 이름을 적어 주세요." : !menu ? "시킨 메뉴를 적어 주세요." : !wdraft.stars ? "별점을 눌러 주세요."
     : !text ? "리뷰를 한 줄이라도 적어 주세요." : wdraft.busy ? "사진을 줄이는 중이에요. 잠깐만 기다려 주세요." : "";
   if (problem) { msg.textContent = problem; return; }
-  const res = Store.addReview({ shop, menu, stars: wdraft.stars, text, photo: wdraft.photo });
+  const like = findLookalike(shop, groupShops());      // 띄어쓰기만 다른 가게가 이미 있으면 그 가게로
+  if (like) shop = like.name;
+  const payload = { shop, menu, stars: wdraft.stars, text, photo: wdraft.photo };
+  const res = wdraft.editId ? Store.updateReview(wdraft.editId, payload) : Store.addReview(payload);
   if (!res.ok) { msg.textContent = res.message; toast(res.message); return; }
   location.hash = "#/shop/" + encodeURIComponent(Store.shopKey(shop));
-  toast("리뷰를 남겼어요.");
+  toast((wdraft.editId ? "리뷰를 고쳤어요." : "리뷰를 남겼어요.") + (like ? ` 이미 있는 "${like.name}" 가게에 남겼어요.` : ""));
 }
 function sendProfile(f) {
   const name = f.elements.name.value.trim().replace(/\s+/g, " ");
   if (!name) { $("#form-msg").textContent = "이름을 적어 주세요."; return; }
+  const first = !Store.getProfile();
   const res = Store.saveProfile({ name, emoji: pdraft.emoji, color: pdraft.color });
   if (!res.ok) { $("#form-msg").textContent = res.message; toast(res.message); return; }
+  if (first && pnext.next === "write") {            // 처음 만든 사람은 바로 리뷰 쓰기로
+    toast("프로필을 만들었어요. 이제 첫 리뷰를 써 보세요.");
+    location.hash = "#/write" + (pnext.shop ? "?shop=" + encodeURIComponent(pnext.shop) : "");
+    return;
+  }
   toast("프로필을 저장했어요.");
   route(true);
 }
 function sendShop(f) {
-  const res = Store.registerShop(f.elements.shop.value);
+  const typed = f.elements.shop.value.trim().replace(/\s+/g, " "), like = findLookalike(typed, groupShops());
+  const res = Store.registerShop(like ? like.name : typed);
   if (!res.ok) { $("#shop-msg").textContent = res.message; return; }
   toast("내 가게로 등록했어요."); route(true);
 }

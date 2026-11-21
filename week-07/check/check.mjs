@@ -18,6 +18,8 @@
 //       댓글 좋아요/싫어요(한 사람 한 번, 내 댓글에는 못 누름), 사장님 매너온도 계산
 //  8-3. 디자인: 중심 색이 하늘색인지, 평균 점수가 가장 큰 글씨인지, 리뷰 사진은 리뷰를 눌러야만 보이는지(목록 · 가게 · 내 프로필),
 //       폰 화면에서 글자가 너무 작지 않은지, 글자와 바탕 색 대비가 충분한지
+//  8-4. 처음 온 사람 점검에서 고친 5가지: ① 첫 화면 순서 안내 · 프로필 만든 뒤 리뷰 쓰기로 이어짐 ② 띄어쓰기만 다른 가게 이름 막기 · 이미 있는 가게 고르기
+//       ③ 내 리뷰 고치기 · 지우기 ④ "내 가게" 접어 두기 · 매너온도 설명 ⑤ "로그인 자리"가 단추처럼 안 보임
 //  9. 저장: 다시 열어도 남는지, 저장 공간이 가득 차면 까닭을 알려 주고 되돌리는지, 저장 코드가 store.js 한곳에만 있는지
 // 10. 이상한 글(HTML 태그)이 그대로 글자로 보이는지
 // 11. 폰 · 태블릿 · 컴퓨터 화면 폭(320~1920)에서 잘리거나 옆으로 밀리지 않는지
@@ -180,6 +182,7 @@ const MAKE_FILE = `(() => {
 const SMALL_PHOTO = `(() => { const c = document.createElement("canvas"); c.width = 320; c.height = 180;
   const g = c.getContext("2d"); g.fillStyle = "#e76f51"; g.fillRect(0, 0, 320, 180); return c.toDataURL("image/jpeg", 0.7); })()`;
 
+function sdP2(photo) { const x = seedData(photo); x.reviews[2].author = { ...me }; return x; }
 const names = () => js(`[...document.querySelectorAll(".shop-card .shop-name")].map((e) => e.innerText.trim())`);
 
 // ── 확인 순서 ──
@@ -470,6 +473,7 @@ try {
   // (d) 리뷰가 아직 없는 가게 등록 (내 프로필)
   await openApp({ seed: seedData(photoUrl), hash: "#/me" });
   check(await js(`!!document.getElementById("no-owned")`), "내 프로필에 \"아직 등록한 내 가게가 없어요\"가 보임", "내 가게 빈 안내가 없음");
+  await js(`document.getElementById("owner-panel").open = true`);
   await submit("#shop-form");
   check((await text("#shop-msg")).includes("가게 이름"), "이름 없이 등록하면 안내가 나옴: " + (await text("#shop-msg")), "이름 없이 등록됨");
   await setVal("#shop-form [name=shop]", "새 가게");
@@ -657,6 +661,149 @@ try {
   const low = Object.entries(seen).filter(([, r]) => r < 4.5);
   check(low.length === 0 && Object.keys(seen).length >= 14, `글자와 바탕 색 대비가 모두 4.5 이상 (${Object.keys(seen).length}곳, 가장 낮은 것 ${Math.min(...Object.values(seen))})`,
     "대비가 낮은 곳: " + JSON.stringify(low) + " / 확인한 곳 " + Object.keys(seen).length + "곳");
+
+  // 8-4. 처음 온 사람 점검에서 고친 5가지
+  console.log("[처음 온 사람 점검에서 고친 5가지]");
+  // ① 첫 화면 순서 안내, 프로필 만든 뒤 리뷰 쓰기로
+  await openApp();
+  d = await js(`({ steps: [...document.querySelectorAll("#empty-all .steps li")].map((l) => l.innerText), btn: ${Q("#empty-all .btn")}.innerText, href: ${Q("#empty-all .btn")}.getAttribute("href") })`);
+  check(d.steps.length === 2 && d.steps[0].startsWith("내 프로필") && d.steps[1].includes("리뷰") && d.href === "#/me?next=write" && d.btn.includes("프로필"),
+    `① 처음 화면에 순서 안내("${d.steps.join(" → ")}")와 [${d.btn}] 단추가 보임`, "① 첫 화면 안내: " + JSON.stringify(d));
+  await shot("8-4-첫화면-순서안내");
+  await click("#empty-all .btn");
+  await until(`!!document.getElementById("profile-form")`);
+  await setVal("#profile-form [name=name]", "처음손님");
+  await submit("#profile-form");
+  await until(`location.hash.startsWith("#/write")`);
+  d = await js(`({ hash: location.hash, form: !!document.getElementById("write-form"), toast: document.getElementById("toast").innerText })`);
+  check(d.hash === "#/write" && d.form && d.toast.includes("프로필을 만들었어요"), "① 프로필을 처음 만들면 바로 리뷰 쓰기 화면으로 넘어가고 안내가 나옴", "① 프로필 만든 뒤: " + JSON.stringify(d));
+  await go("#/me");
+  await submit("#profile-form");
+  await sleep(250);
+  check((await js("location.hash")) === "#/me", "① 이미 프로필이 있는 사람이 고쳐 저장하면 그 화면에 그대로 있음", "① 프로필 고친 뒤 화면이 넘어감: " + (await js("location.hash")));
+  await openApp({ hash: "#/write?shop=" + encodeURIComponent("행복 분식") });
+  check((await js(`${Q("#need-profile .btn")}.getAttribute("href")`)).includes("next=write&shop="), "① 프로필 없이 가게를 정해 들어와도 가게 이름이 따라다님", "① 가게 이름이 안 따라감");
+  await click("#need-profile .btn");
+  await until(`!!document.getElementById("profile-form")`);
+  await setVal("#profile-form [name=name]", "손님2");
+  await submit("#profile-form");
+  await until(`!!document.getElementById("write-form")`);
+  check((await js(`${Q("[name=shop]")}.value`)) === "행복 분식", "① 프로필을 만든 뒤 열린 리뷰 쓰기 칸에 가게 이름이 이미 적혀 있음", "① 가게 이름이 비어 있음");
+
+  // ② 띄어쓰기만 다른 가게
+  await openApp({ seed: seedData(photoUrl), hash: "#/write" });
+  const picks = () => js(`[...document.querySelectorAll(".pick-shop")].map((b) => b.innerText.trim())`);
+  let pk = await picks();
+  check(pk.length === 4 && pk.includes("행복 분식") && pk.includes("할매 국밥"), "② 가게 칸 아래에 이미 있는 가게 4곳이 단추로 보임", "② 가게 단추: " + JSON.stringify(pk));
+  await shot("8-4-가게고르기");
+  await setVal("[name=shop]", "치킨");
+  pk = await picks();
+  check(pk.join() === "골목 치킨", "② \"치킨\"을 치면 맞는 가게만 남음", "② 거른 가게: " + JSON.stringify(pk));
+  await click(".pick-shop");
+  check((await js(`${Q("[name=shop]")}.value`)) === "골목 치킨", "② 가게 단추를 누르면 이름이 칸에 들어감", "② 단추를 눌러도 이름이 안 들어감");
+  await setVal("[name=shop]", "행복분식");
+  d = await js(`({ hint: ${Q("#shop-hint")}?.innerText.replace(/\\s+/g, " "), btn: !!document.querySelector(".use-shop") })`);
+  check(d.hint?.includes("이미 행복 분식 가게가 있어요") && d.btn, "② \"행복분식\"을 치면 \"이미 행복 분식 가게가 있어요\"와 [그 가게에 쓰기] 단추가 보임", "② 비슷한 이름 안내: " + JSON.stringify(d));
+  await shot("8-4-비슷한이름");
+  await click(".use-shop");
+  check((await js(`${Q("[name=shop]")}.value`)) === "행복 분식" && !(await js(`!!${Q("#shop-hint")}`)), "② [그 가게에 쓰기]를 누르면 이름이 바뀌고 안내가 사라짐", "② 그 가게에 쓰기 뒤 상태가 이상함");
+  await setVal("[name=shop]", "완전새가게");
+  check((await picks()).length === 0 && !(await js(`!!${Q("#shop-hint")}`)), "② 정말 새 가게 이름이면 안내도 단추도 나오지 않음", "② 새 가게인데 안내가 나옴");
+  await setVal("[name=shop]", "행복분식"); await setVal("[name=menu]", "라볶이"); await click('.star-btn[data-v="4"]'); await setVal("[name=text]", "띄어쓰기를 다르게 적었어요");
+  await submit("#write-form");
+  await until(`location.hash.startsWith("#/shop/")`);
+  st = await stored();
+  check(st.reviews[0].shop === "행복 분식" && new Set(st.reviews.map((r) => r.shop)).size === 4 && (await js(`document.getElementById("toast").innerText`)).includes("이미 있는"),
+    "② 그냥 \"행복분식\"으로 남겨도 이미 있는 \"행복 분식\"에 들어가서 가게가 갈라지지 않음 (가게는 계속 4곳)", "② 가게 이름들: " + JSON.stringify([...new Set(st.reviews.map((r) => r.shop))]));
+  await openApp({ seed: seedData(photoUrl), hash: "#/me" });
+  await js(`document.getElementById("owner-panel").open = true`);
+  await setVal("#shop-form [name=shop]", "행복분식");
+  await submit("#shop-form");
+  st = await stored();
+  check(Object.keys(st.owners || {}).join() === "행복 분식", "② 내 가게 등록도 \"행복분식\"이라고 적으면 이미 있는 \"행복 분식\"으로 등록됨", "② 등록된 가게: " + JSON.stringify(Object.keys(st.owners || {})));
+
+  // ③ 내 리뷰 고치기 · 지우기
+  const sdG = seedData(photoUrl);
+  const otherReview = sdG.reviews.find((r) => r.menu === "김밥");
+  await openApp({ seed: sdG, hash: K("행복 분식") });
+  d = await js(`({ reviews: document.querySelectorAll(".review").length, actions: document.querySelectorAll(".r-actions").length, mineHasIt: !!document.querySelector(".review .r-actions .edit-btn") })`);
+  check(d.reviews === 3 && d.actions === 1 && d.mineHasIt, "③ 내가 쓴 리뷰에만 [고치기] [지우기]가 보이고, 남의 리뷰에는 없음", "③ 고치기 단추: " + JSON.stringify(d));
+  await shot("8-4-고치기지우기단추");
+  await click(".edit-btn");
+  await until(`location.hash.startsWith("#/write?edit=")`);
+  d = await js(`({ h1: ${Q("h1")}.innerText, shop: ${Q("[name=shop]")}.value, menu: ${Q("[name=menu]")}.value, text: ${Q("[name=text]")}.value, stars: document.querySelectorAll(".star-btn.on").length, send: ${Q("#send")}.innerText })`);
+  check(d.h1 === "리뷰 고치기" && d.shop === "행복 분식" && d.menu === "떡볶이" && d.text === "떡이 쫄깃해요" && d.stars === 4 && d.send === "고친 내용 저장",
+    "③ [고치기]를 누르면 쓴 내용이 그대로 채워진 \"리뷰 고치기\" 화면이 열림", "③ 고치기 화면: " + JSON.stringify(d));
+  await shot("8-4-리뷰고치기");
+  await setVal("[name=menu]", "치즈 떡볶이"); await click('.star-btn[data-v="5"]'); await setVal("[name=text]", "치즈가 늘어나요");
+  await submit("#write-form");
+  await until(`location.hash.startsWith("#/shop/")`);
+  d = await js(`(() => { const r = [...document.querySelectorAll(".review")].find((x) => x.innerText.includes("치즈 떡볶이"));
+    return { avg: ${Q(".avg-num")}.innerText, n: document.querySelectorAll(".review").length, edited: r?.querySelector("time").innerText, comments: r?.querySelectorAll(".comment").length }; })()`);
+  st = await stored();
+  const editedR = st.reviews.find((r) => r.menu === "치즈 떡볶이");
+  check(d.avg === "4.3" && d.n === 3 && d.edited.includes("고침") && d.comments === 1 && editedR.createdAt === T0 + DAY && editedR.editedAt > 0 && st.reviews.length === 10,
+    "③ 고쳐 저장하면 평균이 새로 계산되고(4.0 → 4.3) \"고침\" 표시가 붙고, 댓글과 쓴 날짜는 그대로임", "③ 고친 뒤: " + JSON.stringify(d) + " " + JSON.stringify({ c: editedR?.createdAt, e: editedR?.editedAt }));
+  await go("#/write?edit=" + otherReview.id);
+  const guard = await js(`[!!document.getElementById("cant-edit"), Store.updateReview(${JSON.stringify(otherReview.id)}, { shop: "x", menu: "x", stars: 1, text: "x", photo: null }).ok, Store.deleteReview(${JSON.stringify(otherReview.id)}).ok]`);
+  check(guard[0] && guard[1] === false && guard[2] === false, "③ 남의 리뷰는 주소로 열거나 코드로 시도해도 고치거나 지울 수 없음", "③ 남의 리뷰: " + JSON.stringify(guard));
+  // 사진 빼고 고치기
+  const sdP = seedData(photoUrl); sdP.reviews[2].author = { ...me };
+  await openApp({ seed: sdP, hash: "#/write?edit=" + sdP.reviews[2].id });
+  check(await until(`!!document.getElementById("photo-preview") && document.getElementById("photo-preview").naturalWidth > 0`), "③ 사진이 있는 리뷰를 고칠 때 올렸던 사진이 미리 보임", "③ 고치기 화면에 사진이 안 보임");
+  await click(".photo-clear");
+  await submit("#write-form");
+  await until(`location.hash.startsWith("#/shop/")`);
+  st = await stored();
+  check(st.reviews[2].photo === null && (await js(`document.querySelectorAll(".has-photo").length`)) === 0, "③ 고치면서 [사진 빼기]를 누르면 사진이 지워짐", "③ 사진이 안 지워짐");
+  // 지우기
+  await openApp({ seed: seedData(photoUrl), hash: K("골목 치킨") });
+  await click(".del-btn");
+  d = await js(`({ yes: !!document.querySelector(".del-yes"), no: !!document.querySelector(".del-no"), hint: ${Q(".r-actions .hint")}?.innerText })`);
+  check(d.yes && d.no && d.hint.includes("되돌릴 수 없어요"), "③ [지우기]를 한 번 누르면 \"되돌릴 수 없어요\"와 [지우기] [취소]가 나옴 (바로 지워지지 않음)", "③ 지우기 확인: " + JSON.stringify(d));
+  await shot("8-4-지우기확인");
+  await click(".del-no");
+  check((await js(`document.querySelectorAll(".review").length === 2 && !!document.querySelector(".del-btn") && !document.querySelector(".del-yes")`)), "③ [취소]를 누르면 아무것도 안 지워지고 처음 모습으로 돌아옴", "③ 취소가 이상함");
+  await click(".del-btn");
+  await click(".del-yes");
+  d = await js(`({ n: document.querySelectorAll(".review").length, avg: ${Q(".avg-num")}.innerText, toast: document.getElementById("toast").innerText })`);
+  st = await stored();
+  check(d.n === 1 && d.avg === "3.0" && d.toast.includes("지웠어요") && st.reviews.length === 9, "③ 지우면 리뷰가 사라지고 평균이 새로 계산됨 (2.5 → 3.0)", "③ 지운 뒤: " + JSON.stringify(d));
+  await openApp({ seed: sdP2(photoUrl), hash: K("할매 국밥") });
+  await click(".del-btn"); await click(".del-yes");
+  await until(`location.hash === "#/"`);
+  check((await js(`document.querySelectorAll(".shop-card").length`)) === 3, "③ 가게의 마지막 리뷰를 지우면 목록으로 돌아가고 그 가게는 목록에서 빠짐", "③ 마지막 리뷰를 지운 뒤: " + (await js("location.hash")));
+  await openApp({ seed: sdP2(photoUrl), hash: "#/me" });
+  d = await js(`({ actions: document.querySelectorAll(".my-review .r-actions").length, reviews: document.querySelectorAll(".my-review").length })`);
+  await click(".my-review.has-photo .del-btn");
+  const meDel = await js(`({ exp: document.querySelector(".my-review.has-photo").getAttribute("aria-expanded"), yes: !!document.querySelector(".my-review .del-yes"), img: !!document.querySelector(".my-review .r-photo") })`);
+  check(d.actions === d.reviews && d.reviews === 4 && meDel.yes && meDel.exp === "false" && !meDel.img, "③ 내 프로필의 내 리뷰에도 [고치기] [지우기]가 있고, 그 단추를 눌러도 사진이 펼쳐지지 않음", "③ 내 프로필 단추: " + JSON.stringify({ d, meDel }));
+
+  // ④ 내 가게 접어 두기 · 매너온도 설명
+  await openApp({ seed: seedData(photoUrl), hash: "#/me" });
+  d = await js(`({ tag: ${Q("#owner-panel")}.tagName, open: ${Q("#owner-panel")}.open, sum: ${Q("#owner-panel summary")}.innerText })`);
+  check(d.tag === "DETAILS" && !d.open && d.sum.includes("가게 주인이신가요"), "④ 내 프로필의 가게 등록은 \"가게 주인이신가요?\" 칸 안에 접혀 있음 (손님에게는 안 거슬림)", "④ 내 가게 칸: " + JSON.stringify(d));
+  await shot("8-4-내가게-접힘");
+  await click("#owner-panel summary");
+  await submit("#shop-form");
+  check((await js(`${Q("#owner-panel")}.open`)) && (await text("#shop-msg")).includes("가게 이름"), "④ 눌러서 펼치면 가게 등록 칸이 열리고 쓸 수 있음", "④ 펼쳐지지 않음");
+  const sdH = seedData(photoUrl); sdH.owners = { "골목 치킨": ownerOf({ ...me }) };
+  await openApp({ seed: sdH, hash: "#/me" });
+  check(await js(`${Q("#owner-panel")}.open`), "④ 이미 내 가게가 있으면 칸이 처음부터 펼쳐져 있음", "④ 내 가게가 있는데 접혀 있음");
+  await go(K("골목 치킨"));
+  d = await js(`({ sum: ${Q(".temp-help summary")}.innerText, open: ${Q(".temp-help")}.open })`);
+  check(d.sum === "매너온도가 뭐예요?" && !d.open, "④ 매너온도 옆에 \"매너온도가 뭐예요?\"가 접혀 있음", "④ 매너온도 설명 칸: " + JSON.stringify(d));
+  await click(".temp-help summary");
+  const help = await js(`${Q(".temp-help")}.innerText.replace(/\\s+/g, " ")`);
+  check(help.includes("36.5") && help.includes("0.5") && help.includes("0.2") && help.includes("0.3") && help.includes("답글") && help.includes("좋아요") && help.includes("싫어요"),
+    "④ 누르면 기본 36.5°C, 답글 +0.5, 좋아요 +0.2, 싫어요 −0.3 규칙이 쉬운 말로 나옴", "④ 설명 글: " + help);
+  await shot("8-4-매너온도설명");
+
+  // ⑤ 로그인 자리가 단추처럼 안 보임
+  const slotCss = await js(`(() => { const s = document.getElementById("login-slot"), c = getComputedStyle(s);
+    return { text: s.innerText.trim(), border: c.borderTopStyle, bg: c.backgroundColor, cursor: c.cursor, tab: s.hasAttribute("tabindex"), role: s.getAttribute("role") }; })()`);
+  check(slotCss.text === "로그인 자리" && slotCss.border === "none" && (slotCss.bg === "rgba(0, 0, 0, 0)" || slotCss.bg === "transparent") && slotCss.cursor === "default" && !slotCss.tab && !slotCss.role,
+    "⑤ \"로그인 자리\"는 점선 테두리 없이 흐린 글자로만 보이고, 마우스를 올려도 단추 모양이 아님", "⑤ 로그인 자리 모양: " + JSON.stringify(slotCss));
 
   // 10. 이상한 글
   console.log("[이상한 글]");

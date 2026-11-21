@@ -4,7 +4,7 @@
 //
 // 저장하는 모양 ("pt-matjip-v1" 한 칸에 통째로):
 //   { profile: { id, name, emoji, color } | null,
-//     reviews: [ { id, shop, menu, stars(1~5), text, photo(data:image/… 또는 null), createdAt,
+//     reviews: [ { id, shop, menu, stars(1~5), text, photo(data:image/… 또는 null), createdAt, editedAt(고친 때, 없으면 0),
 //                  author: { id, name, emoji, color },
 //                  comments: [ { id, text, createdAt, author: { id, name, emoji, color },
 //                                owner(사장님이 자기 가게 리뷰에 단 답글이면 true), likes: [누른 사람 id], dislikes: [누른 사람 id] } ] } ]  // 새 리뷰가 맨 앞
@@ -41,7 +41,7 @@ const Store = (() => {
         out.reviews.push({
           id: str(r.id, 60) || newId(), shop, menu, stars, text: str(r.text, 1000),
           photo: typeof r.photo === "string" && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(r.photo) ? r.photo : null,
-          createdAt: num(r.createdAt), author: cleanAuthor(r.author),
+          createdAt: num(r.createdAt), editedAt: num(r.editedAt), author: cleanAuthor(r.author),
           comments: (Array.isArray(r.comments) ? r.comments : []).filter((c) => c && typeof c === "object" && str(c.text, 400)).map((c) => ({
             id: str(c.id, 60) || newId(), text: str(c.text, 400), createdAt: num(c.createdAt), author: cleanAuthor(c.author),
             owner: c.owner === true, likes: ids(c.likes), dislikes: ids(c.dislikes),
@@ -162,6 +162,29 @@ const Store = (() => {
         data.reviews.unshift(review);
         return review;
       });
+    },
+
+    // 내가 쓴 리뷰 고치기 (댓글 · 쓴 날짜는 그대로, 고친 때만 남긴다)
+    updateReview(id, { shop, menu, stars, text, photo }) {
+      if (!data.profile) return { ok: false, message: "먼저 내 프로필을 만들어 주세요." };
+      const r = data.reviews.find((x) => x.id === id);
+      if (!r) return { ok: false, message: "그 리뷰를 찾지 못했어요." };
+      if (r.author.id !== data.profile.id) return { ok: false, message: "내가 쓴 리뷰만 고칠 수 있어요." };
+      return commit(() => {
+        r.shop = str(shop, 60).trim() || r.shop; r.menu = str(menu, 60).trim() || r.menu;
+        r.stars = Math.min(5, Math.max(1, Math.round(stars))); r.text = str(text, 1000);
+        r.photo = photo || null; r.editedAt = Date.now();
+        return r;
+      });
+    },
+
+    // 내가 쓴 리뷰 지우기 (그 리뷰에 달린 댓글도 같이 지워진다)
+    deleteReview(id) {
+      if (!data.profile) return { ok: false, message: "먼저 내 프로필을 만들어 주세요." };
+      const i = data.reviews.findIndex((x) => x.id === id);
+      if (i < 0) return { ok: false, message: "그 리뷰를 찾지 못했어요." };
+      if (data.reviews[i].author.id !== data.profile.id) return { ok: false, message: "내가 쓴 리뷰만 지울 수 있어요." };
+      return commit(() => { data.reviews.splice(i, 1); });
     },
 
     // 댓글 달기 (작성자는 지금 프로필)
