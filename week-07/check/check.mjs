@@ -1,65 +1,35 @@
-// 날씨 앱 확인 도구
+// 맛집 평점판 확인 도구
 // 쓰는 법 (QUEST-TRACK-2 폴더에서):
-//   node week-06/check/check.mjs            ← 내 앱 (week-06/index.html)
-// Edge(없으면 Chrome)를 화면 없이 띄워서 앱을 열고, 여러 상황을 만들어 보고, 사진을 찍는다.
+//   node week-07/check/check.mjs            ← 내 작품 (week-07/index.html)
+// Edge(없으면 Chrome)를 화면 없이 띄워서 작품을 열고, 사람이 하듯 눌러 보고 글을 써 보고, 사진을 찍는다.
 // 사진은 check/shots/, 브라우저 임시 폴더는 check/.browser-tmp/ 에 생긴다. (둘 다 커밋 안 함)
 //
 // 확인하는 것
-//  1. 진짜 인터넷으로 날씨를 받아 와 보여 주는지
-//  2. 불러오는 동안 "불러오는 중"이 보이는지
-//  3. 못 받아 왔을 때(인터넷 끊김 · 서버 오류 · 이상한 내용) 빈 화면 대신 까닭이 보이는지
-//  4. "다시 불러오기" 단추가 되는지
-//  5. 날씨 번호가 모두 한국어 낱말로 바뀌는지
-//  6. 폰 · 태블릿 · 컴퓨터 화면 폭에서 잘리거나 옆으로 밀리지 않는지
-//  7. 못 받아 왔을 때 마지막으로 받은 날씨를 "언제 받은 것인지"와 같이 보여 주는지
-//  8. 폰에 설치되는 앱(PWA)인지: GitHub Pages 와 같은 주소(/QUEST-TRACK-2/week-06/)로 작은 서버를 켜서
-//     manifest · 아이콘 · 서비스 워커 · 설치 가능 여부 · 인터넷이 끊겨도 앱이 열리는지
-//  9. 브라우저 오류 메시지가 없는지
+//  1. 처음 열면 빈 안내가 나오고, 위쪽에 "로그인 자리"만 있는지 (눌러지는 로그인 기능은 없음)
+//  2. 프로필 없이는 리뷰를 못 쓰고, 프로필(이름 · 그림 · 색)을 만들면 저장되는지
+//  3. 리뷰 쓰기: 빈칸 안내, 별점, 저장, 평균 계산
+//  4. 사진: 크게 찍은 사진이 800px 이하로 줄어서 저장되고 보이는지
+//  5. 댓글: 달기, 저장, 작성자 이름
+//  6. 목록: 평균 · 리뷰 개수, 검색(가게 · 메뉴), 별점 거르기, 순서 3가지
+//  7. 가게 자세히: 별점 분포, 많이 시킨 메뉴
+//  8. 내 프로필: 어떤 가게에 어떤 리뷰를 남겼는지, 이름을 고치면 옛 리뷰 이름도 바뀌는지
+//  9. 저장: 다시 열어도 남는지, 저장 공간이 가득 차면 까닭을 알려 주고 되돌리는지, 저장 코드가 store.js 한곳에만 있는지
+// 10. 이상한 글(HTML 태그)이 그대로 글자로 보이는지
+// 11. 폰 · 태블릿 · 컴퓨터 화면 폭(320~1920)에서 잘리거나 옆으로 밀리지 않는지
+// 12. 브라우저 오류 메시지가 없는지
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEEK = resolve(HERE, "..");
-const target = process.argv[2] || "";
-const APP = resolve(WEEK, target, "index.html");
+const APP = resolve(WEEK, "index.html");
 const SHOTS = join(HERE, "shots");
 const TMP = join(HERE, ".browser-tmp");
-const PORT = 9334;
-const API_HOST = "wttr.in";
-const WEB_PORT = 8606;
-const PAGES_PATH = "/QUEST-TRACK-2/week-06/"; // GitHub Pages 주소와 같은 길
-const HTTP_APP = `http://127.0.0.1:${WEB_PORT}${PAGES_PATH}`;
-
-// ── 작은 서버: week-06 폴더를 GitHub Pages 처럼 /QUEST-TRACK-2/week-06/ 에서 보여 준다 ──
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-  ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml" };
-let server = null;
-function startServer() {
-  return new Promise((ok) => {
-    server = createServer((req, res) => {
-      const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
-      if (!path.startsWith(PAGES_PATH)) { res.writeHead(404); return res.end(); }
-      let file = resolve(WEEK, "." + path.slice(PAGES_PATH.length - 1));
-      if (!file.startsWith(WEEK)) { res.writeHead(403); return res.end(); }
-      if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
-      if (!existsSync(file)) { res.writeHead(404); return res.end(); }
-      const ext = file.slice(file.lastIndexOf("."));
-      res.writeHead(200, { "Content-Type": TYPES[ext] || "application/octet-stream", "Cache-Control": "no-cache" });
-      res.end(readFileSync(file));
-    }).listen(WEB_PORT, "127.0.0.1", ok);
-  });
-}
-function stopServer() {
-  return new Promise((ok) => {
-    if (!server) return ok();
-    const s = server; server = null;
-    s.closeAllConnections(); s.close(() => ok());
-  });
-}
+const PORT = 9337;
+const KEY = "pt-matjip-v1";
 
 const BROWSERS = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -67,13 +37,13 @@ const BROWSERS = [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
 ];
 
-// ── 결과 모으기 ──
 const ok = [], bad = [];
 const pass = (text) => { ok.push(text); console.log("  ✅ " + text); };
 const fail = (text) => { bad.push(text); console.log("  ❌ " + text); };
+const check = (cond, good, badText) => (cond ? pass(good) : fail(badText));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-if (!existsSync(APP)) { console.log("앱 파일이 없어요: " + APP); process.exit(1); }
+if (!existsSync(APP)) { console.log("작품 파일이 없어요: " + APP); process.exit(1); }
 const browserPath = BROWSERS.find(existsSync);
 if (!browserPath) { console.log("Edge 나 Chrome 을 찾지 못했어요."); process.exit(1); }
 
@@ -81,7 +51,6 @@ rmSync(SHOTS, { recursive: true, force: true });
 mkdirSync(SHOTS, { recursive: true });
 rmSync(TMP, { recursive: true, force: true });
 
-// ── 브라우저 켜기 ──
 const browser = spawn(browserPath, [
   "--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${TMP}`,
   "--window-size=1280,800", "--no-first-run", "--no-default-browser-check", "about:blank",
@@ -96,7 +65,7 @@ function send(method, params = {}) {
   ws.send(JSON.stringify({ id, method, params }));
   return new Promise((ok, no) => waiting.set(id, { ok, no }));
 }
-async function js(expr) { // 앱 안에서 코드를 돌리고 결과를 받아 옴
+async function js(expr) { // 작품 안에서 코드를 돌리고 결과를 받아 옴
   const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
   return r.result.value;
@@ -105,46 +74,6 @@ async function shot(name) {
   const r = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(join(SHOTS, name + ".png"), Buffer.from(r.data, "base64"));
 }
-
-// ── 날씨 서버로 가는 요청을 가로채서 상황을 만든다 ──
-// mode: "real" 진짜로 보냄 / "hold" 붙잡아 둠(불러오는 중) / "offline" 인터넷 끊김
-//       "500" 서버 오류 / "broken" 이상한 내용 / "mock" 정해 둔 가짜 날씨
-let mode = "real";
-let mockData = null;
-const held = [];
-const CORS = [
-  { name: "Content-Type", value: "application/json" },
-  { name: "Access-Control-Allow-Origin", value: "*" },
-];
-const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
-
-async function onRequest(p) {
-  const requestId = p.requestId;
-  if (!p.request.url.includes(API_HOST) || mode === "real") return send("Fetch.continueRequest", { requestId });
-  if (mode === "hold") { held.push(requestId); return; }
-  if (mode === "offline") return send("Fetch.failRequest", { requestId, errorReason: "InternetDisconnected" });
-  if (mode === "500") return send("Fetch.fulfillRequest", { requestId, responseCode: 500, responseHeaders: CORS, body: b64("서버 오류") });
-  if (mode === "broken") return send("Fetch.fulfillRequest", { requestId, responseCode: 200, responseHeaders: CORS, body: b64("{}") });
-  if (mode === "mock") return send("Fetch.fulfillRequest", { requestId, responseCode: 200, responseHeaders: CORS, body: b64(JSON.stringify(mockData)) });
-}
-
-// wttr.in 과 같은 모양의 가짜 날씨 (숫자도 글자로 옴, 관측 시각은 영국 시간)
-// tm: 내일 [낮 12시 기온, 낮 12시 날씨 번호, 가장 높은, 가장 낮은]. 없으면 내일 정보가 빠진 것
-function fakeWeather(t, code, hi, lo, tm = [t + 2, 116, hi + 3, lo + 1]) {
-  const days = [{ date: "2026-11-14", maxtempC: String(hi), mintempC: String(lo) }];
-  if (tm) days.push({
-    date: "2026-11-15", maxtempC: String(tm[2]), mintempC: String(tm[3]),
-    hourly: [0, 300, 600, 900, 1200, 1500, 1800, 2100].map((h) => ({
-      time: String(h), tempC: String(h === 1200 ? tm[0] : tm[0] - 3), weatherCode: String(h === 1200 ? tm[1] : 113),
-    })),
-  });
-  return {
-    current_condition: [{ temp_C: String(t), weatherCode: String(code), observation_time: "06:46 AM" }],
-    weather: days,
-  };
-}
-const click = (id) => js(`document.getElementById("${id}").click()`);
-
 async function connect() {
   for (let i = 0; i < 50; i++) {
     try {
@@ -159,13 +88,11 @@ async function connect() {
             const w = waiting.get(m.id); waiting.delete(m.id);
             m.error ? w.no(new Error(m.error.message)) : w.ok(m.result);
           }
-          if (m.method === "Fetch.requestPaused") onRequest(m.params).catch(() => {});
           if (m.method === "Runtime.exceptionThrown")
             consoleErrors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
           if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error")
             consoleErrors.push(m.params.args.map((a) => a.value ?? a.description).join(" "));
-          // 일부러 만든 네트워크 실패는 오류로 세지 않음
-          if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && m.params.entry.source !== "network")
+          if (m.method === "Log.entryAdded" && m.params.entry.level === "error")
             consoleErrors.push(m.params.entry.text + (m.params.entry.url ? " (" + m.params.entry.url + ")" : ""));
         });
         return;
@@ -176,50 +103,79 @@ async function connect() {
   throw new Error("브라우저에 연결하지 못했어요.");
 }
 
-// 지금 보이는 상태: "loading" / "weather" / "error" / "빈 화면"
-const STATE = `(() => {
-  const vis = (id) => { const el = document.getElementById(id); return el && !el.hidden && el.offsetHeight > 0; };
-  return {
-    state: vis("loading") ? "loading" : vis("weather") ? "weather" : vis("error") ? "error" : "빈 화면",
-    temp: document.getElementById("now-temp")?.innerText.trim(),
-    word: document.getElementById("now-word")?.innerText.trim(),
-    high: document.getElementById("high")?.innerText.trim(),
-    low: document.getElementById("low")?.innerText.trim(),
-    why: document.getElementById("error-why")?.innerText.trim(),
-    button: !document.getElementById("reload")?.disabled,
-    stale: vis("stale"),
-    staleText: document.getElementById("stale")?.innerText.trim(),
-    time: document.getElementById("time")?.innerText.trim(),
-    dayLabel: document.getElementById("day-label")?.innerText.trim(),
-    pressed: [...document.querySelectorAll(".days button[aria-pressed=true]")].map((b) => b.innerText.trim()).join(","),
-    tomorrowOff: !!document.getElementById("day-tomorrow")?.disabled,
-  };
-})()`;
-async function waitState(want, ms = 12000) {
+// ── 도우미 ──
+const Q = (sel) => `document.querySelector(${JSON.stringify(sel)})`;
+const text = (sel) => js(`${Q(sel)}?.innerText.trim() ?? null`);
+const count = (sel) => js(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
+const click = (sel) => js(`${Q(sel)}.click()`);
+const setVal = (sel, v) => js(`(() => { const e = ${Q(sel)}; e.value = ${JSON.stringify(v)};
+  e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+const submit = (sel) => js(`${Q(sel)}.requestSubmit()`);
+const stored = () => js(`JSON.parse(localStorage.getItem(${JSON.stringify(KEY)}) || "null")`);
+async function until(expr, ms = 4000) {
   const end = Date.now() + ms;
-  let s;
-  while (Date.now() < end) {
-    s = await js(STATE);
-    if (s.state === want) return s;
-    await sleep(100);
-  }
-  return s;
+  while (Date.now() < end) { try { if (await js(expr)) return true; } catch {} await sleep(60); }
+  return false;
 }
-// keep: 마지막으로 받은 날씨 기억을 남겨 둘지 (기본은 지우고 처음 연 것처럼)
-async function openWith(m, { keep = false, url = pathToFileURL(APP).href } = {}) {
-  mode = m;
+async function go(hash) {
+  await js(`location.hash = ${JSON.stringify(hash)}`);
+  await sleep(150);
+}
+let openCount = 0;
+// seed: 미리 넣어 둘 저장 내용(없으면 처음 연 것처럼 비움). keep: 저장된 것을 그대로 두고 다시 열기
+async function openApp({ seed = null, keep = false, hash = "#/" } = {}) {
   let id = null;
-  if (!keep) id = (await send("Page.addScriptToEvaluateOnNewDocument", {
-    source: `try { localStorage.removeItem("pt-weather-last") } catch (e) {}`,
-  })).identifier;
-  await send("Page.navigate", { url });
+  if (!keep) {
+    const code = seed
+      ? `try { localStorage.setItem(${JSON.stringify(KEY)}, ${JSON.stringify(JSON.stringify(seed))}) } catch (e) {}`
+      : `try { localStorage.removeItem(${JSON.stringify(KEY)}) } catch (e) {}`;
+    id = (await send("Page.addScriptToEvaluateOnNewDocument", { source: code })).identifier;
+  }
+  await send("Page.navigate", { url: pathToFileURL(APP).href + "?n=" + ++openCount + hash });
   await sleep(300);
+  await until(`document.readyState === "complete" && document.getElementById("view").children.length > 0`);
   if (id) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: id });
 }
-async function setOffline(off) {
-  await send("Network.emulateNetworkConditions", { offline: off, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+
+// 가짜 저장 내용 만들기
+const me = { id: "me-1", name: "맛객", emoji: "🐻", color: "#ffd6a5" };
+const other = (n, emoji = "🦊") => ({ id: "o-" + n, name: n, emoji, color: "#a0c4ff" });
+const DAY = 86400000, T0 = Date.UTC(2026, 10, 1, 3, 0, 0);
+let rid = 0;
+const rev = (shop, menu, stars, textBody, author, day, extra = {}) => ({
+  id: "r" + ++rid, shop, menu, stars, text: textBody, photo: null, createdAt: T0 + day * DAY, author, comments: [], ...extra,
+});
+function seedData(photo) {
+  const reviews = [
+    rev("골목 치킨", "양념 반반", 3, "양념은 좋은데 기다림이 길어요", other("지민"), 9),
+    rev("골목 치킨", "후라이드", 2, "조금 짰어요", me, 8),
+    rev("할매 국밥", "순대국밥", 5, "국물이 진하고 든든해요", other("서준", "🐼"), 7, { photo }),
+    rev("초밥집", "모둠초밥", 4, "신선해요", other("하늘", "🐧"), 6),
+    rev("초밥집", "연어초밥", 4, "연어가 두툼해요", me, 5),
+    rev("초밥집", "모둠초밥", 4, "가성비 좋아요", other("지민"), 4),
+    rev("초밥집", "우동", 4, "국물이 시원해요", other("서준", "🐼"), 3),
+    rev("행복 분식", "떡볶이", 5, "매콤달콤 최고", other("하늘", "🐧"), 2),
+    rev("행복 분식", "떡볶이", 4, "떡이 쫄깃해요", me, 1, { comments: [
+      { id: "c1", text: "저도 가 봤어요!", createdAt: T0 + 1.5 * DAY, author: other("지민") }] }),
+    rev("행복 분식", "김밥", 3, "그냥 평범해요", other("서준", "🐼"), 0),
+  ];
+  return { profile: me, reviews };
 }
-const isTemp = (s) => /^-?\d+°$/.test(s || "");
+// 시험용 사진 만들기 (2000×1500 큰 사진을 고른 것처럼)
+const MAKE_FILE = `(() => {
+  const c = document.createElement("canvas"); c.width = 2000; c.height = 1500;
+  const g = c.getContext("2d"); const gr = g.createLinearGradient(0, 0, 2000, 1500);
+  gr.addColorStop(0, "#e76f51"); gr.addColorStop(1, "#f4a261"); g.fillStyle = gr; g.fillRect(0, 0, 2000, 1500);
+  g.fillStyle = "#fff"; g.font = "bold 200px sans-serif"; g.fillText("PHOTO", 500, 800);
+  return new Promise((res) => c.toBlob((b) => {
+    const dt = new DataTransfer(); dt.items.add(new File([b], "food.png", { type: "image/png" }));
+    const input = document.getElementById("photo"); input.files = dt.files; input.dispatchEvent(new Event("change", { bubbles: true })); res(b.size);
+  }, "image/png"));
+})()`;
+const SMALL_PHOTO = `(() => { const c = document.createElement("canvas"); c.width = 320; c.height = 180;
+  const g = c.getContext("2d"); g.fillStyle = "#e76f51"; g.fillRect(0, 0, 320, 180); return c.toDataURL("image/jpeg", 0.7); })()`;
+
+const names = () => js(`[...document.querySelectorAll(".shop-card .shop-name")].map((e) => e.innerText.trim())`);
 
 // ── 확인 순서 ──
 try {
@@ -227,245 +183,273 @@ try {
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Log.enable");
-  await send("Network.enable");
-  await send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-  console.log("\n앱: " + APP + "\n");
+  console.log("\n작품: " + APP + "\n");
 
-  // 1. 진짜 인터넷
-  console.log("[진짜 날씨 받아 오기]");
-  await openWith("real");
-  const real = await waitState("weather");
-  await shot("1-진짜날씨");
-  if (real.state === "weather") {
-    pass(`날씨를 받아 와 보여 줌: 지금 ${real.temp} ${real.word}, 가장 높은 ${real.high}, 가장 낮은 ${real.low}`);
-    isTemp(real.temp) && isTemp(real.high) && isTemp(real.low) ? pass("기온이 모두 숫자와 ° 로 나옴") : fail(`기온 모양이 이상함: ${real.temp} / ${real.high} / ${real.low}`);
-    !real.word.includes("알 수 없는") ? pass("오늘 날씨 번호가 한국어 낱말로 바뀜") : fail("오늘 날씨 번호를 모름: " + real.word);
-  } else {
-    fail(`날씨를 받아 오지 못함 (화면: ${real.state}${real.why ? ", 까닭: " + real.why : ""})`);
-  }
+  // 1. 처음 열기
+  console.log("[처음 열었을 때]");
+  await openApp();
+  await shot("1-처음");
+  check(await js(`!!${Q("#empty-all")}`), "리뷰가 없으면 \"아직 리뷰가 없어요\" 안내와 [리뷰 쓰기] 단추가 보임", "빈 안내가 안 보임");
+  const slot = await js(`(() => { const s = document.getElementById("login-slot"); const r = s.getBoundingClientRect();
+    return { text: s.innerText.trim(), tag: s.tagName, inner: s.querySelectorAll("a, button, input, form").length, top: r.top, visible: r.height > 0 }; })()`);
+  check(slot.text === "로그인 자리" && slot.visible && slot.top < 120, `화면 위쪽에 "${slot.text}" 가 보임`, "로그인 자리가 위쪽에 안 보임: " + JSON.stringify(slot));
+  check(slot.tag === "DIV" && slot.inner === 0, "로그인 자리는 글자만 있는 빈 자리 (누르는 단추 · 입력칸 없음)", "로그인 자리에 기능이 들어 있음: " + JSON.stringify(slot));
 
-  if (real.state === "weather") {
-    await click("day-tomorrow");
-    const rt = await js(STATE);
-    await shot("1-진짜날씨-내일");
-    rt.dayLabel === "내일" && isTemp(rt.temp) && !rt.word.includes("알 수 없는") && isTemp(rt.high) && isTemp(rt.low)
-      ? pass(`[내일] 진짜 내일 날씨: 낮 12시 ${rt.temp} ${rt.word}, 가장 높은 ${rt.high}, 가장 낮은 ${rt.low}`)
-      : fail("진짜 내일 날씨: " + JSON.stringify(rt));
-  }
+  // 2. 프로필 없이 리뷰 쓰기 → 프로필 만들기
+  console.log("[프로필]");
+  await go("#/write");
+  check(await js(`!!${Q("#need-profile")} && !${Q("#write-form")}`), "프로필이 없으면 리뷰 쓰는 칸 대신 \"먼저 프로필을 만들어 주세요\"가 보임", "프로필 없이 리뷰 칸이 열림");
+  await go("#/me");
+  await submit("#profile-form");
+  check((await text("#form-msg")).includes("이름"), "이름 없이 저장하면 안내가 나옴: " + (await text("#form-msg")), "이름 없이 저장됨");
+  await setVal("#profile-form [name=name]", "맛객");
+  await click('.emoji-btn[data-emoji="🐻"]');
+  await click('.color-btn[data-color="#caffbf"]');
+  const prev = await js(`(() => { const a = document.querySelector("#p-preview .av"); return { t: a.innerText.trim(), bg: a.style.backgroundColor, n: document.querySelector("#p-preview b").innerText }; })()`);
+  check(prev.t === "🐻" && prev.n === "맛객", `고른 그림과 이름이 바로 미리 보임 (${prev.t} ${prev.n})`, "미리 보기: " + JSON.stringify(prev));
+  await shot("2-프로필");
+  await submit("#profile-form");
+  let st = await stored();
+  check(st?.profile?.name === "맛객" && st.profile.emoji === "🐻" && st.profile.color === "#caffbf" && st.profile.id,
+    "프로필(이름 · 그림 · 색)이 이 기기에 저장됨", "저장된 프로필: " + JSON.stringify(st?.profile));
+  check(await js(`!!${Q("#no-mine")}`), "남긴 리뷰가 없으면 \"아직 남긴 리뷰가 없어요\"가 보임", "내 리뷰 빈 안내가 없음");
+  const profileId = st.profile.id;
 
-  // 1-1. [오늘] [내일] 단추
-  console.log("[오늘 · 내일 단추]");
-  mockData = fakeWeather(6, 113, 11, 2, [15, 302, 17, 8]);
-  await openWith("mock");
-  let d = await waitState("weather", 5000);
-  d.pressed === "오늘" && d.temp === "6°" && d.word === "맑음" && d.dayLabel === "오늘"
-    ? pass("처음에는 [오늘] 이 눌려 있고 오늘 날씨(6° 맑음)가 보임") : fail("처음 화면: " + JSON.stringify(d));
-  await click("day-tomorrow");
-  d = await js(STATE);
-  await shot("1-내일단추");
-  d.pressed === "내일" && d.temp === "15°" && d.word === "비" && d.high === "17°" && d.low === "8°" && d.dayLabel === "내일"
-    ? pass("[내일] 을 누르면 내일 낮 12시 15° 비, 가장 높은 17°, 가장 낮은 8° 가 보임") : fail("내일 화면: " + JSON.stringify(d));
-  d.time.includes("내일 낮 12시 예보") ? pass(`아래 글이 "${d.time}" 로 바뀜`) : fail("내일 아래 글: " + d.time);
-  await click("day-today");
-  d = await js(STATE);
-  d.pressed === "오늘" && d.temp === "6°" && d.high === "11°" && d.dayLabel === "오늘" && d.time.includes("관측")
-    ? pass("[오늘] 을 다시 누르면 오늘 날씨로 돌아옴") : fail("오늘로 돌아오기: " + JSON.stringify(d));
-  await click("day-tomorrow");
-  mockData = fakeWeather(7, 113, 12, 3, [16, 113, 18, 9]);
-  await click("reload");
-  d = await waitState("weather", 5000);
-  d.pressed === "내일" && d.temp === "16°" ? pass("[내일] 을 보다가 다시 불러오면 새 내일 날씨(16°)를 보여 줌") : fail("다시 불러온 뒤: " + JSON.stringify(d));
-  mockData = fakeWeather(6, 113, 11, 2, null);
-  await openWith("mock");
-  d = await waitState("weather", 5000);
-  d.tomorrowOff && d.temp === "6°" && d.pressed === "오늘"
-    ? pass("내일 정보가 빠져 오면 [내일] 단추만 잠기고 오늘 날씨는 그대로 보임") : fail("내일 정보 없음: " + JSON.stringify(d));
-
-  // 2. 불러오는 중
-  console.log("[불러오는 동안]");
-  await openWith("hold");
-  const hold = await waitState("loading", 3000);
-  await shot("2-불러오는중");
-  hold.state === "loading" ? pass("답을 기다리는 동안 \"불러오는 중\"이 보임") : fail("기다리는 동안 화면: " + hold.state);
-  !hold.button ? pass("불러오는 동안 다시 불러오기 단추가 잠김") : fail("불러오는 동안에도 단추를 누를 수 있음");
-  mode = "real";
-  for (const id of held.splice(0)) await send("Fetch.continueRequest", { requestId: id }).catch(() => {});
-
-  // 3. 못 받아 왔을 때
-  console.log("[못 받아 왔을 때]");
-  for (const [m, name, mustHave] of [
-    ["offline", "인터넷 끊김", "연결"],
-    ["500", "서버 오류", "500"],
-    ["broken", "이상한 내용", "빠진"],
-  ]) {
-    await openWith(m);
-    const s = await waitState("error", 5000);
-    await shot("3-못받음-" + name);
-    if (s.state !== "error") { fail(`${name}: 까닭 대신 화면이 "${s.state}"`); continue; }
-    s.why && s.why.includes(mustHave) ? pass(`${name}: 까닭이 보임 — "${s.why}"`) : fail(`${name}: 까닭이 맞지 않음 — "${s.why}"`);
-  }
-
-  // 4. 다시 불러오기
-  console.log("[다시 불러오기 단추]");
-  mockData = fakeWeather(3.4, 113, 9.6, -1.2);
-  mode = "mock";
-  await js(`document.getElementById("reload").click()`);
-  const again = await waitState("weather", 5000);
-  const againTime = await js(`document.getElementById("time").innerText`);
-  again.state === "weather" && again.temp === "3°" && again.word === "맑음" && again.high === "10°" && again.low === "-1°"
-    ? pass("못 받은 뒤 단추를 누르면 다시 받아 와서 보여 줌 (3.4 → 3°, 9.6 → 10°, -1.2 → -1°)")
-    : fail(`다시 불러오기 뒤: ${JSON.stringify(again)}`);
-  againTime.includes("오늘 15:46") ? pass("관측 시각을 한국 시간으로 바꿈 (06:46 AM → 오늘 15:46)") : fail("관측 시각: " + againTime);
-
-  // 5. 날씨 번호 → 한국어
-  console.log("[날씨 번호 바꾸기]");
-  const CODES = [113, 116, 119, 122, 143, 176, 179, 182, 185, 200, 227, 230, 248, 260, 263, 266, 281, 284, 293, 296, 299, 302, 305, 308,
-    311, 314, 317, 320, 323, 326, 329, 332, 335, 338, 350, 353, 356, 359, 362, 365, 368, 371, 374, 377, 386, 389, 392, 395];
-  const words = await js(`${JSON.stringify(CODES)}.map((c) => [c, weatherWord(c)])`);
-  const notKo = words.filter(([, w]) => w.includes("알 수 없는") || /[A-Za-z]/.test(w));
-  notKo.length ? fail("한국어로 안 바뀐 번호: " + notKo.map(([c]) => c).join(", ")) : pass(`날씨 번호 ${CODES.length}개가 모두 한국어 낱말로 바뀜`);
-  const map = Object.fromEntries(words);
-  map[113] === "맑음" && map[119] === "흐림" && map[302] === "비" && map[332] === "눈"
-    ? pass("113 → 맑음, 119 → 흐림, 302 → 비, 332 → 눈") : fail(`113 → ${map[113]}, 119 → ${map[119]}, 302 → ${map[302]}, 332 → ${map[332]}`);
-  const unknown = await js(`weatherWord(42)`);
-  unknown.includes("42") ? pass(`모르는 번호도 비우지 않고 알려 줌 (42 → "${unknown}")`) : fail("모르는 번호 42 → " + unknown);
-
-  // 6. 화면 폭
-  console.log("[화면 폭]");
-  const SIZES = [
-    [320, 568, true, "작은 폰"], [390, 844, true, "폰"], [768, 1024, true, "태블릿"],
-    [1280, 800, false, "노트북"], [1920, 1080, false, "큰 모니터"],
+  // 3. 리뷰 쓰기
+  console.log("[리뷰 쓰기]");
+  await go("#/write");
+  check(await js(`!!${Q("#write-form")} && document.querySelector("#write-form .av").innerText.trim() === "🐻"`), "프로필이 있으면 리뷰 칸이 열리고 작성자 그림이 보임", "리뷰 칸이 안 열림");
+  await shot("3-리뷰쓰기-빈칸");
+  const tries = [
+    [[], "가게"], [["shop", "행복 분식"], "메뉴"], [["menu", "떡볶이"], "별점"], [["#star", 4], "리뷰"],
   ];
+  for (const [[a, b], word] of tries) {
+    if (a === "#star") await click('.star-btn[data-v="4"]'); else if (a) await setVal(`[name=${a}]`, b);
+    await submit("#write-form");
+    const m = await text("#form-msg");
+    check(m.includes(word), `빈칸이 남으면 안내가 나옴 — "${m}"`, `빈칸 안내가 이상함 (기대: ${word}): "${m}"`);
+  }
+  check((await stored())?.reviews?.length === 0, "빈칸이 있을 때는 아무것도 저장되지 않음", "빈칸인데 저장됨");
+  const starState = await js(`[...document.querySelectorAll(".star-btn")].map((b) => b.classList.contains("on")).join()`);
+  check(starState === "true,true,true,true,false" && (await text("#star-word")).startsWith("4점"), "별 4번째를 누르면 별 4개가 켜지고 \"4점\"이 보임", "별 상태: " + starState);
+  await shot("3-리뷰쓰기-별점");
+  await setVal("[name=text]", "매콤달콤 맛있어요\n또 올게요");
+  await submit("#write-form");
+  await until(`location.hash.startsWith("#/shop/")`);
+  check(await js(`location.hash.startsWith("#/shop/") && !!${Q("#shop-detail")}`), "남기면 그 가게 화면으로 넘어감", "남긴 뒤 화면: " + (await js("location.hash")));
+  let d = await js(`({ name: ${Q(".shop-name")}.innerText, avg: ${Q(".avg-num")}.innerText, cnt: ${Q(".shop-head .count")}.innerText, text: ${Q(".r-text")}.innerText, menu: ${Q(".r-menu")}.innerText, who: ${Q(".r-name")}.innerText })`);
+  check(d.name === "행복 분식" && d.avg === "4.0" && d.cnt === "리뷰 1개" && d.menu.includes("떡볶이") && d.who === "맛객" && d.text.includes("또 올게요"),
+    `리뷰가 저장되어 보임: ${d.name} 평균 ${d.avg}, ${d.cnt}, 메뉴 ${d.menu.replace("🍴 ", "")}, 작성자 ${d.who}`, "남긴 리뷰: " + JSON.stringify(d));
+  st = await stored();
+  check(st.reviews.length === 1 && st.reviews[0].author.id === profileId && st.reviews[0].stars === 4, "저장된 리뷰에 작성자 · 별점이 들어 있음", "저장 내용: " + JSON.stringify(st.reviews));
+  await shot("3-리뷰남김");
+
+  // 4. 사진
+  console.log("[사진]");
+  await go("#/write?shop=" + encodeURIComponent("행복 분식"));
+  check((await js(`${Q("[name=shop]")}.value`)) === "행복 분식", "[이 가게에 리뷰 쓰기]로 열면 가게 이름이 미리 적혀 있음", "가게 이름이 안 채워짐");
+  await setVal("[name=menu]", "순대");
+  await click('.star-btn[data-v="5"]');
+  await setVal("[name=text]", "사진도 올려 봐요");
+  const pngSize = await js(MAKE_FILE);
+  const gotPhoto = await until(`!!document.getElementById("photo-preview") && document.getElementById("photo-preview").naturalWidth > 0`);
+  check(gotPhoto, `사진을 고르면 미리 보임 (원래 ${(pngSize / 1024).toFixed(0)}KB)`, "사진 미리 보기가 안 보임");
+  await shot("4-사진고름");
+  await submit("#write-form");
+  await until(`location.hash.startsWith("#/shop/")`);
+  st = await stored();
+  const photo = st.reviews[0].photo;
+  const dim = await js(`new Promise((res) => { const i = new Image(); i.onload = () => res(i.width + "x" + i.height); i.onerror = () => res("열리지 않음"); i.src = ${JSON.stringify(photo)}; })`);
+  const [pw, ph] = dim.split("x").map(Number);
+  check(photo?.startsWith("data:image/jpeg") && Math.max(pw, ph) === 800 && pw / ph > 1.3 && pw / ph < 1.37,
+    `2000×1500 사진이 ${dim} 으로 줄어 JPEG(${(photo.length / 1024).toFixed(0)}KB)로 저장됨`, "저장된 사진: " + dim);
+  check(await js(`(() => { const i = document.querySelector(".review .r-photo"); return !!i && i.naturalWidth > 0; })()`), "리뷰에 사진이 보임", "리뷰에 사진이 안 보임");
+  d = await js(`({ avg: ${Q(".avg-num")}.innerText, cnt: ${Q(".shop-head .count")}.innerText })`);
+  check(d.avg === "4.5" && d.cnt === "리뷰 2개", `같은 가게에 한 번 더 남기면 하나로 묶임: 평균 ${d.avg}, ${d.cnt} ((4+5)÷2)`, "평균: " + JSON.stringify(d));
+  await shot("4-사진리뷰");
+  await go("#/write");
+  await setVal("#photo", "");           // 파일 칸 비우기 시도는 무시되지만 사진 빼기 단추는 아래에서 확인
+  await js(MAKE_FILE);
+  await until(`!!document.getElementById("photo-preview")`);
+  await click(".photo-clear");
+  check(await js(`!document.getElementById("photo-preview")`), "[사진 빼기]를 누르면 사진이 빠짐", "사진이 안 빠짐");
+
+  // 5. 댓글
+  console.log("[댓글]");
+  await go("#/shop/" + encodeURIComponent("행복 분식"));
+  const firstId = await js(`${Q(".review")}.dataset.id`);
+  await setVal(`.review[data-id="${firstId}"] .c-form input`, "저도 가 봤어요, 맛있죠!");
+  await submit(`.review[data-id="${firstId}"] .c-form`);
+  const cm = await js(`(() => { const r = document.querySelector('.review[data-id="${firstId}"]'); return { n: r.querySelector(".c-count").innerText, t: r.querySelector(".c-text").innerText, who: r.querySelector(".c-head b").innerText }; })()`);
+  check(cm.n === "댓글 1개" && cm.t.includes("맛있죠") && cm.who === "맛객", `댓글이 달림: "${cm.t}" — ${cm.who} (${cm.n})`, "댓글: " + JSON.stringify(cm));
+  await submit(`.review[data-id="${firstId}"] .c-form`);
+  check((await text(`.review[data-id="${firstId}"] .c-count`)) === "댓글 1개", "빈 댓글은 달리지 않음", "빈 댓글이 달림");
+  st = await stored();
+  check(st.reviews.find((r) => r.id === firstId).comments.length === 1, "댓글이 그 리뷰 안에 저장됨", "저장된 댓글: " + JSON.stringify(st.reviews.find((r) => r.id === firstId).comments));
+  await shot("5-댓글");
+
+  // 9-1. 다시 열어도 남아 있는지
+  console.log("[저장]");
+  await openApp({ keep: true, hash: "#/shop/" + encodeURIComponent("행복 분식") });
+  d = await js(`({ avg: ${Q(".avg-num")}.innerText, n: document.querySelectorAll(".review").length, c: document.querySelectorAll(".comment").length, p: document.querySelectorAll(".r-photo").length })`);
+  check(d.avg === "4.5" && d.n === 2 && d.c === 1 && d.p === 1, "창을 닫았다 다시 열어도 리뷰 2개 · 사진 · 댓글이 그대로 있음", "다시 연 뒤: " + JSON.stringify(d));
+
+  // 저장 공간이 가득 찼을 때
+  await go("#/write");
+  await setVal("[name=shop]", "가득 찬 집"); await setVal("[name=menu]", "국수"); await click('.star-btn[data-v="3"]'); await setVal("[name=text]", "저장이 안 되는 척");
+  await js(`window.__orig = Storage.prototype.setItem; Storage.prototype.setItem = function () { throw new DOMException("full", "QuotaExceededError"); }`);
+  await submit("#write-form");
+  const full = await text("#form-msg");
+  await js(`Storage.prototype.setItem = window.__orig`);
+  check(full.includes("가득") && (await stored()).reviews.length === 2,
+    `저장 공간이 가득 차면 까닭을 알려 주고 아무것도 바뀌지 않음 — "${full}"`, `가득 찬 때: "${full}", 저장된 리뷰 ${(await stored()).reviews.length}개`);
+  check(await js(`!!${Q("#write-form")}`), "그때 쓰던 글은 화면에 그대로 남아 있음", "쓰던 글이 사라짐");
+  const only = readFileSync(join(WEEK, "index.html"), "utf8");
+  check(!/localStorage|sessionStorage|indexedDB/.test(only) && /localStorage/.test(readFileSync(join(WEEK, "store.js"), "utf8")),
+    "저장하는 코드는 store.js 한곳에만 있음 (index.html 에는 localStorage 가 없음)", "index.html 이 저장소를 직접 씀");
+
+  // 6. 목록
+  console.log("[목록 · 평균 · 검색 · 거르기 · 순서]");
+  const photoUrl = await js(SMALL_PHOTO);
+  await openApp({ seed: seedData(photoUrl) });
+  await shot("6-목록");
+  const cards = await js(`[...document.querySelectorAll(".shop-card")].map((c) => ({ n: c.querySelector(".shop-name").innerText, a: c.querySelector(".avg-num").innerText, c: c.querySelector(".count").innerText }))`);
+  const byName = Object.fromEntries(cards.map((c) => [c.n, c]));
+  check(cards.length === 4, "가게 4곳이 카드로 보임", "카드 수: " + cards.length);
+  check(byName["행복 분식"]?.a === "4.0" && byName["행복 분식"].c === "리뷰 3개" && byName["골목 치킨"]?.a === "2.5" && byName["골목 치킨"].c === "리뷰 2개" && byName["할매 국밥"]?.a === "5.0",
+    "평균과 리뷰 개수가 맞음: 행복 분식 4.0 (5·4·3), 골목 치킨 2.5 (3·2), 할매 국밥 5.0", "카드: " + JSON.stringify(cards));
+  check(await js(`document.querySelector(".sub").innerText.includes("가게 4곳 · 리뷰 10개")`), "위쪽에 \"가게 4곳 · 리뷰 10개\"", "개수 글: " + (await text(".sub")));
+  check(await js(`document.querySelectorAll(".shop-card .thumb img").length === 1`), "사진이 있는 가게(할매 국밥)만 카드에 사진이 보임", "카드 사진 수가 이상함");
+  check((await names()).join() === "할매 국밥,초밥집,행복 분식,골목 치킨", "처음 순서는 평균 높은 순 (같은 4.0 이면 리뷰 많은 초밥집이 먼저): " + (await names()).join(" > "), "처음 순서: " + (await names()).join());
+  await setVal("#sort", "count");
+  check((await names()).join() === "초밥집,행복 분식,골목 치킨,할매 국밥", "[리뷰 많은 순]: " + (await names()).join(" > "), "리뷰 많은 순: " + (await names()).join());
+  await setVal("#sort", "new");
+  check((await names()).join() === "골목 치킨,할매 국밥,초밥집,행복 분식", "[최신순] (가장 나중에 리뷰 받은 가게부터): " + (await names()).join(" > "), "최신순: " + (await names()).join());
+  await setVal("#sort", "avg");
+  await setVal("#min", "4");
+  check((await names()).join() === "할매 국밥,초밥집,행복 분식", "[4점 이상]만 거르면 골목 치킨이 빠짐", "4점 이상: " + (await names()).join());
+  await setVal("#min", "0");
+  await setVal("#q", "치킨");
+  check((await names()).join() === "골목 치킨", "가게 이름으로 찾기: \"치킨\" → 골목 치킨", "치킨 검색: " + (await names()).join());
+  await setVal("#q", "김밥");
+  check((await names()).join() === "행복 분식", "메뉴로도 찾기: \"김밥\" → 행복 분식", "김밥 검색: " + (await names()).join());
+  await setVal("#q", "없는집");
+  check(await js(`!!${Q("#no-match")}`), "찾는 가게가 없으면 \"맞는 가게가 없어요\"가 보임", "없는 가게 안내가 없음");
+  await shot("6-검색결과없음");
+  await setVal("#q", "");
+  await click(".shop-card");
+  await until(`location.hash.startsWith("#/shop/")`);
+  check(await js(`!!${Q("#shop-detail")}`), "카드를 누르면 가게 자세히 화면으로 감", "카드를 눌러도 안 넘어감");
+  await js(`history.back()`); await sleep(300);
+  const keep = await js(`({ sort: ${Q("#sort")}.value, n: document.querySelectorAll(".shop-card").length })`);
+  check(keep.n === 4, "뒤로 가면 목록으로 돌아옴", "뒤로 간 뒤: " + JSON.stringify(keep));
+
+  // 7. 가게 자세히
+  console.log("[가게 자세히]");
+  await go("#/shop/" + encodeURIComponent("행복 분식"));
+  d = await js(`({
+    avg: ${Q(".avg-num")}.innerText,
+    dist: [5,4,3,2,1].map((n) => document.querySelector('.dist-row[data-star="' + n + '"] .num').innerText).join(),
+    w5: document.querySelector('.dist-row[data-star="5"] .bar span').style.width,
+    w2: document.querySelector('.dist-row[data-star="2"] .bar span').style.width,
+    pop: [...document.querySelectorAll(".pop li")].map((li) => li.innerText.replace(/\\s+/g, " ")),
+    n: document.querySelectorAll(".review").length, c: document.querySelectorAll(".comment").length })`);
+  check(d.avg === "4.0" && d.dist === "1,1,1,0,0" && d.w5 === "100%" && d.w2 === "0%", "별점 분포: 5점 1 · 4점 1 · 3점 1 · 2점 0 · 1점 0, 막대 길이도 맞음", "분포: " + JSON.stringify(d));
+  check(d.pop[0].startsWith("떡볶이 2번 · 평균 4.5점") && d.pop[1].startsWith("김밥 1번"), `많이 시킨 메뉴: ${d.pop.join(" / ")}`, "인기 메뉴: " + JSON.stringify(d.pop));
+  check(d.n === 3 && d.c === 1, "리뷰 3개 · 댓글 1개가 보임 (미리 넣어 둔 다른 사람 댓글 포함)", "리뷰 · 댓글 수: " + JSON.stringify(d));
+  await shot("7-가게자세히");
+  await go("#/shop/" + encodeURIComponent("없는 가게"));
+  check(await js(`document.getElementById("view").innerText.includes("찾지 못했어요")`), "없는 가게 주소는 \"찾지 못했어요\" 안내", "없는 가게 주소 화면이 이상함");
+
+  // 8. 내 프로필에서 내 리뷰 모아 보기
+  console.log("[내 프로필: 어떤 가게에 어떤 리뷰를 남겼는지]");
+  await go("#/me");
+  const mine = await js(`({
+    sum: document.getElementById("my-summary").innerText,
+    shops: [...document.querySelectorAll(".my-shop")].map((s) => s.querySelector(".my-shop-name").innerText + ":" + [...s.querySelectorAll(".my-review")].map((r) => r.querySelector(".chip").innerText.replace("🍴 ", "") + "/" + r.querySelector(".r-text").innerText).join("|")),
+    others: [...document.querySelectorAll(".my-review .r-text")].some((e) => e.innerText.includes("신선해요")) })`);
+  check(mine.sum === "가게 3곳 · 리뷰 3개 · 댓글 0개", `요약: ${mine.sum}`, "요약: " + mine.sum);
+  check(mine.shops.length === 3 && mine.shops.some((s) => s === "행복 분식:떡볶이/떡이 쫄깃해요") && mine.shops.some((s) => s === "골목 치킨:후라이드/조금 짰어요") && mine.shops.some((s) => s === "초밥집:연어초밥/연어가 두툼해요") && !mine.others,
+    "내가 남긴 리뷰만 가게별로 모여 보임: " + mine.shops.join("  ·  "), "내 리뷰: " + JSON.stringify(mine));
+  await shot("8-내프로필");
+  await setVal("#profile-form [name=name]", "새이름");
+  await click('.emoji-btn[data-emoji="🐼"]');
+  await submit("#profile-form");
+  st = await stored();
+  const mineAfter = st.reviews.filter((r) => r.author.id === "me-1");
+  const cmtAfter = st.reviews.flatMap((r) => r.comments).filter((c) => c.author.id === "me-1");
+  const notMine = st.reviews.filter((r) => r.author.id !== "me-1").every((r) => r.author.name !== "새이름");
+  check(mineAfter.length === 3 && mineAfter.every((r) => r.author.name === "새이름" && r.author.emoji === "🐼") && notMine,
+    "프로필 이름 · 그림을 고치면 내가 쓴 리뷰 3개의 이름 · 그림도 같이 바뀌고 남의 리뷰는 그대로", "고친 뒤: " + JSON.stringify(mineAfter.map((r) => r.author)));
+  await go("#/shop/" + encodeURIComponent("행복 분식"));
+  check((await js(`[...document.querySelectorAll(".r-name")].map((e) => e.innerText).includes("새이름")`)), "가게 화면에서도 새 이름으로 보임", "가게 화면에 새 이름이 안 보임");
+  // 내 댓글 수
+  await setVal(`.review .c-form input`, "내 새 댓글");
+  await submit(`.review .c-form`);
+  await go("#/me");
+  check((await text("#my-summary")).includes("댓글 1개"), "내가 단 댓글 수도 요약에 보임: " + (await text("#my-summary")), "댓글 요약: " + (await text("#my-summary")));
+
+  // 10. 이상한 글
+  console.log("[이상한 글]");
+  const evil = seedData(null);
+  evil.reviews[0].text = '<img src=x onerror="window.__hacked=1"><b>굵게</b> & "따옴표"';
+  evil.reviews[0].shop = "<script>window.__hacked=1</script>가게";
+  evil.reviews[0].comments = [{ id: "ce", text: "<i>기울임</i>", createdAt: T0, author: { ...me, name: "<u>이름</u>" } }];
+  await openApp({ seed: evil, hash: "#/shop/" + encodeURIComponent(evil.reviews[0].shop.toLowerCase()) });
+  d = await js(`({ hacked: !!window.__hacked, tags: document.querySelectorAll(".review .r-text b, .review .r-text img, .c-text i, .c-head u").length,
+    text: ${Q(".r-text")}.innerText, name: ${Q(".shop-name")}.innerText })`);
+  check(!d.hacked && d.tags === 0 && d.text.includes("<b>굵게</b>") && d.name.startsWith("<script>"),
+    "HTML 태그가 들어간 글 · 가게 · 이름도 그냥 글자로 보이고 실행되지 않음", "이상한 글: " + JSON.stringify(d));
+
+  // 11. 화면 폭
+  console.log("[화면 폭]");
+  const long = seedData(photoUrl);
+  long.reviews.unshift(
+    rev("아주아주아주아주긴가게이름아주아주아주아주긴가게이름", "엄청나게긴메뉴이름엄청나게긴메뉴이름엄청나게긴", 5, "ㅋ".repeat(150) + " https://example.com/" + "a".repeat(120), { id: "o-x", name: "열두글자이름열두글자이름", emoji: "🦁", color: "#ffc6ff" }, 10, {
+      photo: photoUrl, comments: [{ id: "cl", text: "b".repeat(180), createdAt: T0, author: other("지민") }] }),
+  );
+  const SIZES = [[320, 568, true, "작은 폰"], [390, 844, true, "폰"], [768, 1024, true, "태블릿"], [1280, 800, false, "노트북"], [1920, 1080, false, "큰 모니터"]];
   const FIT = `(() => {
-    const W = document.documentElement.clientWidth;
-    const out = [];
-    document.querySelectorAll(".card, .card *").forEach((el) => {
-      if (el.offsetParent === null && el.tagName !== "MAIN") return;
+    const W = document.documentElement.clientWidth, out = [];
+    document.querySelectorAll("body *").forEach((el) => {
+      if (el.offsetParent === null && !["BODY", "MAIN"].includes(el.tagName) && getComputedStyle(el).position !== "fixed") return;
       const r = el.getBoundingClientRect();
       if (r.width && (r.left < -0.5 || r.right > W + 0.5)) out.push((el.id || el.className || el.tagName) + " " + Math.round(r.left) + "~" + Math.round(r.right));
     });
-    const card = document.querySelector(".card").getBoundingClientRect();
-    return { W, scrollW: document.documentElement.scrollWidth, out, card: Math.round(card.width) };
+    return { W, scrollW: document.documentElement.scrollWidth, out: out.slice(0, 4) };
   })()`;
-  // 긴 날씨 낱말과 큰 숫자로 시험 (영하 두 자리)
-  mockData = fakeWeather(-18, 392, -10, -24);
+  const longKey = encodeURIComponent(Store_key(long.reviews[0].shop));
+  function Store_key(s) { return s.trim().replace(/\s+/g, " ").toLowerCase(); }
+  const VIEWS = [["목록", "#/"], ["가게", "#/shop/" + longKey], ["리뷰쓰기", "#/write?shop=" + encodeURIComponent(long.reviews[0].shop)], ["내프로필", "#/me"]];
   for (const [w, h, mobile, name] of SIZES) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile });
-    for (const [m, label] of [["mock", "날씨"], ["offline", "못받음"], ["stale", "예전정보"]]) {
-      if (m === "stale") { // 한 번 받아 둔 뒤 못 받게 하기
-        await openWith("mock"); await waitState("weather", 5000);
-        await openWith("offline", { keep: true });
-      } else await openWith(m);
-      await waitState(m === "offline" ? "error" : "weather", 5000);
+    for (const [label, hash] of VIEWS) {
+      const s = label === "내프로필" ? { ...long, reviews: [{ ...long.reviews[0], author: me }, ...long.reviews.slice(1)] } : long;
+      await openApp({ seed: s, hash });
+      await sleep(150);
       const f = await js(FIT);
-      await shot(`6-${name}${w}-${label}`);
-      f.scrollW <= f.W && f.out.length === 0
-        ? pass(`${name} ${w}×${h} (${label}): 옆으로 밀리거나 잘린 것 없음, 카드 폭 ${f.card}`)
-        : fail(`${name} ${w}×${h} (${label}): 페이지 폭 ${f.scrollW} > 화면 ${f.W}, 넘친 것: ${f.out.join(", ") || "없음"}`);
+      await shot(`11-${name}${w}-${label}`);
+      check(f.scrollW <= f.W && f.out.length === 0, `${name} ${w}×${h} (${label}): 옆으로 밀리거나 잘린 것 없음`,
+        `${name} ${w}×${h} (${label}): 페이지 폭 ${f.scrollW} > 화면 ${f.W}, 넘친 것: ${f.out.join(", ") || "없음"}`);
     }
   }
-
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await openApp({ seed: long, hash: "#/" });
+  const slotPhone = await js(`(() => { const r = document.getElementById("login-slot").getBoundingClientRect(); return r.top < 120 && r.right <= innerWidth && r.height > 0; })()`);
+  check(slotPhone, "폰 화면에서도 \"로그인 자리\"가 위쪽에 온전히 보임", "폰에서 로그인 자리가 이상함");
 
-  // 7. 마지막으로 받은 날씨
-  console.log("[못 받아 왔을 때 마지막으로 받은 날씨]");
-  mockData = fakeWeather(5, 116, 8, 1);
-  await openWith("mock");
-  await waitState("weather", 5000);
-  const saved = await js(`JSON.parse(localStorage.getItem("pt-weather-last") || "null")`);
-  saved && saved.nowTemp === 5 && Math.abs(Date.now() - saved.savedAt) < 60000
-    ? pass("받아 온 날씨와 받은 때를 기억해 둠") : fail("기억해 둔 것: " + JSON.stringify(saved));
-  const whenNow = await js(`whenText(${saved?.savedAt ?? 0})`);
-  // (1) 폰이 인터넷 끊김 상태
-  await setOffline(true);
-  await openWith("offline", { keep: true });
-  let st = await waitState("weather", 5000);
-  await shot("7-인터넷끊김-예전정보");
-  st.state === "weather" && st.stale && st.temp === "5°" && st.word === "구름 조금"
-    ? pass("인터넷이 끊기면 빈 화면 대신 마지막으로 받은 날씨(5° 구름 조금)를 보여 줌") : fail("인터넷 끊김: " + JSON.stringify(st));
-  st.staleText?.includes("인터넷이 끊겨") && st.staleText.includes(whenNow + "에 받은 정보")
-    ? pass(`까닭과 받은 때가 같이 보임 — "${st.staleText.replace(/\n/g, " ")}"`) : fail("안내 글: " + st.staleText);
-  st.time?.includes(whenNow + "에 받음") && st.dayLabel === "그날"
-    ? pass(`아래 시각도 받은 때로 바뀜 ("${st.time}"), "오늘" 대신 "그날"`) : fail(`시각: ${st.time}, 앞말: ${st.dayLabel}`);
-  await click("day-tomorrow");
-  st = await js(STATE);
-  await shot("7-인터넷끊김-예전정보-내일");
-  st.stale && st.temp === "7°" && st.dayLabel === "그다음 날" && st.time.includes(whenNow + "에 받은 내일 낮 12시 예보")
-    ? pass(`끊긴 동안 [내일] 을 눌러도 받아 둔 내일 날씨(7°)와 받은 때를 보여 줌 ("${st.time}")`) : fail("끊긴 동안 내일: " + JSON.stringify(st));
-  await click("day-today");
-  // (2) 인터넷이 다시 켜지면 저절로 새로 받기
-  mockData = fakeWeather(7, 113, 9, 2);
-  mode = "mock";
-  await setOffline(false);
-  await sleep(1500);
-  st = await js(STATE);
-  st.temp === "7°" && !st.stale && st.dayLabel === "오늘"
-    ? pass("인터넷이 다시 켜지면 저절로 새 날씨(7°)를 받고 안내가 사라짐") : fail("다시 켜진 뒤: " + JSON.stringify(st));
-  // (3) 인터넷은 되는데 서버가 오류
-  await openWith("500", { keep: true });
-  st = await waitState("weather", 5000);
-  st.stale && st.staleText.includes("500") && st.temp === "7°"
-    ? pass("서버 오류 때도 까닭(500)과 마지막 날씨(7°)를 같이 보여 줌") : fail("서버 오류: " + JSON.stringify(st));
-
-  // 8. 폰에 설치되는 앱 (PWA)
-  console.log("[폰에 설치되는 앱 (GitHub Pages 와 같은 주소: " + PAGES_PATH + ")]");
-  await startServer();
-  mockData = fakeWeather(10, 113, 14, 4);
-  await openWith("mock", { url: HTTP_APP });
-  await waitState("weather", 5000);
-  const man = await send("Page.getAppManifest");
-  if (!man.url) fail("manifest 를 찾지 못함");
-  else {
-    man.errors?.length ? fail("manifest 오류: " + man.errors.map((e) => e.message).join(", ")) : pass("manifest 를 읽음 (" + man.url.replace(HTTP_APP, "") + ")");
-    const m = JSON.parse(man.data);
-    const startUrl = new URL(m.start_url, man.url).href;
-    startUrl === HTTP_APP ? pass("시작 주소가 week-06 주소와 같음 (" + PAGES_PATH + ")") : fail("시작 주소: " + startUrl);
-    m.display === "standalone" ? pass("설치하면 주소창 없이 앱처럼 열림 (standalone)") : fail("display: " + m.display);
-    for (const ic of m.icons) {
-      const u = new URL(ic.src, man.url).href;
-      const size = await js(`fetch(${JSON.stringify(u)}).then((r) => r.ok ? r.blob() : null).then((b) => b && createImageBitmap(b)).then((im) => im && im.width + "x" + im.height).catch(() => null)`);
-      size === ic.sizes ? pass(`아이콘 ${ic.src} (${ic.purpose}) 이 ${size} 크기로 열림`) : fail(`아이콘 ${ic.src}: 기대 ${ic.sizes}, 실제 ${size}`);
-    }
-  }
-  const sw = await js(`Promise.race([navigator.serviceWorker.ready.then((r) => r.scope), new Promise((ok) => setTimeout(() => ok(null), 8000))])`);
-  sw === HTTP_APP ? pass("서비스 워커가 켜짐 (범위: " + PAGES_PATH + ")") : fail("서비스 워커: " + sw);
-  await send("Page.reload");
-  await sleep(300);
-  await waitState("weather", 5000);
-  const ctl = await js(`!!navigator.serviceWorker.controller`);
-  ctl ? pass("다시 열면 서비스 워커가 앱을 맡음") : fail("서비스 워커가 앱을 맡지 않음");
-  const cached = await js(`caches.keys().then((k) => Promise.all(k.map((n) => caches.open(n).then((c) => c.keys())))).then((l) => l.flat().map((r) => new URL(r.url).pathname))`);
-  const need = ["", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"].map((f) => PAGES_PATH + f);
-  const miss = need.filter((p) => !cached.includes(p));
-  miss.length ? fail("저장 안 된 앱 파일: " + miss.join(", ")) : pass("앱 파일을 폰에 저장해 둠 (" + cached.length + "개)");
-  const inst = await send("Page.getInstallabilityErrors");
-  inst.installabilityErrors?.length
-    ? fail("설치할 수 없는 까닭: " + inst.installabilityErrors.map((e) => e.errorId).join(", "))
-    : pass("브라우저가 '설치할 수 있는 앱'으로 알아봄");
-  await shot("8-설치앱-주소로열기");
-  // 인터넷이 완전히 끊겼을 때: 서버도 끄고, 날씨 서버도 끊고, 앱을 다시 열기
-  await stopServer();
-  await setOffline(true);
-  await openWith("offline", { keep: true, url: HTTP_APP });
-  st = await waitState("weather", 6000);
-  await shot("8-설치앱-인터넷끊김");
-  st.state === "weather" && st.stale && st.temp === "10°"
-    ? pass("서버도 인터넷도 끊긴 채 다시 열어도 앱이 열리고 마지막 날씨(10°)와 받은 때를 보여 줌") : fail("끊긴 채 다시 열기: " + JSON.stringify(st));
-  await setOffline(false);
-
-  // 9. 오류
+  // 12. 오류
   console.log("[오류 메시지]");
   consoleErrors.length ? consoleErrors.forEach((e) => fail("브라우저 오류: " + e)) : pass("브라우저 오류 메시지 없음");
 } catch (e) {
   fail("확인 도중 멈춤: " + e.message);
 } finally {
   try { ws?.close(); } catch {}
-  await stopServer().catch(() => {});
   browser.kill();
 }
 
 console.log(`\n결과: 통과 ${ok.length}개, 실패 ${bad.length}개`);
 console.log("사진: " + SHOTS + "  (" + readdirSync(SHOTS).length + "장)");
-console.log("이 도구로 확인 못 하는 것: 실제 폰에서 손으로 만졌을 때 느낌, 받아 온 날씨가 창밖 날씨와 맞는지, 10초 기다림 뒤 포기하는 것(시간이 오래 걸려 빼 둠), 진짜 폰 홈 화면에 설치되는 모습(안드로이드 · 아이폰)\n");
+console.log("이 도구로 확인 못 하는 것: 실제 폰에서 손으로 만졌을 때 느낌, 폰 카메라로 찍은 진짜 사진(HEIC 등), 여러 사람이 쓸 때의 모습(로그인 · 보관함을 붙인 뒤에 확인), 맛 평가가 정직한지\n");
 process.exit(bad.length ? 1 : 0);

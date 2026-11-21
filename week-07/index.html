@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>동네 맛집 평점판</title>
+<style>
+  :root {
+    --bg: #fff8f0; --card: #ffffff; --ink: #2b2118; --muted: #76675a; --line: #ecdcc8;
+    --brand: #c2410c; --brand-ink: #ffffff; --soft: #ffeedd; --star: #f5a623; --star-off: #e6d9c7; --ok: #1b7f3b; --bad: #b42318;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; overflow-wrap: anywhere; }
+  a { color: inherit; }
+  h1, h2, h3, p { margin: 0; }
+  img { max-width: 100%; height: auto; }
+  :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+
+  /* 위쪽 줄: 이름 · 메뉴 · 로그인 자리 */
+  .top { background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .top-in { max-width: 960px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .brand { font-weight: 800; font-size: 1.15rem; text-decoration: none; margin-right: auto; }
+  .login-slot { order: 1; border: 2px dashed var(--line); border-radius: 999px; padding: 4px 14px; color: var(--muted); font-size: .9rem; white-space: nowrap; }
+  .nav { order: 2; width: 100%; display: flex; gap: 6px; }
+  .nav a { flex: 1 1 0; text-align: center; padding: 8px 6px; border-radius: 10px; text-decoration: none; font-weight: 600; background: var(--soft); }
+  .nav a[aria-current="page"] { background: var(--brand); color: var(--brand-ink); }
+  @media (min-width: 720px) {
+    .nav { order: 1; width: auto; }
+    .nav a { flex: none; padding: 8px 16px; }
+    .login-slot { order: 2; }
+  }
+
+  main { max-width: 960px; margin: 0 auto; padding: 16px 16px 48px; }
+  footer { max-width: 960px; margin: 0 auto; padding: 0 16px 32px; color: var(--muted); font-size: .85rem; }
+  h1 { font-size: 1.5rem; line-height: 1.3; }
+  h2 { font-size: 1.15rem; line-height: 1.35; }
+  h3 { font-size: 1rem; }
+  .sub, .hint { color: var(--muted); font-size: .92rem; }
+  .intro { margin-bottom: 14px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .back { display: inline-block; margin-bottom: 10px; color: var(--muted); }
+
+  /* 단추 · 입력칸 */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: inherit; font-weight: 700; padding: 10px 16px; min-height: 44px; border-radius: 10px;
+         border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+  .btn.small { min-height: 40px; padding: 6px 14px; }
+  .btn[disabled] { opacity: .6; cursor: default; }
+  .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .field > span, legend { font-weight: 700; font-size: .92rem; }
+  input, select, textarea { font: inherit; color: inherit; background: #fff; border: 1px solid #cdbba5; border-radius: 10px; padding: 9px 12px; min-height: 44px; width: 100%; min-width: 0; }
+  textarea { resize: vertical; min-height: 96px; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .form { display: grid; gap: 14px; }
+  .msg { color: var(--bad); font-weight: 700; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .grow { flex: 1 1 220px; }
+
+  /* 별 */
+  .stars { display: inline-block; font-size: 1.05rem; line-height: 1; letter-spacing: 1px; color: transparent; white-space: nowrap;
+           background: linear-gradient(90deg, var(--star) var(--p, 0%), var(--star-off) var(--p, 0%)); -webkit-background-clip: text; background-clip: text; }
+  .star-pick { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .star-btn { font-size: 2rem; line-height: 1; width: 48px; height: 48px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--star-off); cursor: pointer; padding: 0; }
+  .star-btn.on { color: var(--star); border-color: var(--star); }
+  .star-word { font-weight: 700; margin-left: 6px; }
+
+  /* 프로필 그림 */
+  .av { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; font-size: 1.4rem; flex: none; border: 1px solid rgba(0,0,0,.08); }
+  .av.sm { width: 30px; height: 30px; font-size: 1.05rem; }
+  .av.lg { width: 64px; height: 64px; font-size: 2.2rem; }
+  .pick { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pick button { width: 44px; height: 44px; border-radius: 10px; border: 2px solid var(--line); background: #fff; font-size: 1.4rem; cursor: pointer; padding: 0; }
+  .pick button.on { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand); }
+  .pick.colors button { border-radius: 50%; }
+  .preview { display: flex; align-items: center; gap: 12px; }
+
+  /* 가게 목록 */
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+  .shop-card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; text-decoration: none; min-width: 0; }
+  .shop-card:hover { border-color: var(--brand); }
+  .thumb { aspect-ratio: 16 / 9; background: var(--soft); display: flex; align-items: center; justify-content: center; font-size: 2.6rem; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card-body { padding: 12px 14px 14px; display: grid; gap: 4px; }
+  .rating { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .avg-num { font-size: 1.1rem; }
+  .count, .menus, .snippet, time { color: var(--muted); font-size: .9rem; }
+  .snippet { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .empty { text-align: center; padding: 32px 16px; color: var(--muted); display: grid; gap: 12px; justify-items: center; }
+
+  /* 가게 자세히 */
+  .shop-head { display: grid; gap: 10px; }
+  .avg-big { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+  .avg-big b { font-size: 2.4rem; line-height: 1; }
+  .sum-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); margin-top: 14px; }
+  .dist-row { display: grid; grid-template-columns: 2.2em 1fr 2.2em; align-items: center; gap: 8px; font-size: .9rem; }
+  .dist-row .num { text-align: right; }
+  .bar { height: 12px; background: var(--soft); border-radius: 6px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--star); border-radius: 6px; }
+  .pop { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+  .pop li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+  .pop li b { font-weight: 700; }
+  .list-title { margin: 18px 0 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+
+  /* 리뷰 · 댓글 */
+  .review { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; display: grid; gap: 8px; }
+  .r-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .r-who { display: grid; min-width: 0; }
+  .r-stars { margin-left: auto; }
+  .chip { display: inline-block; background: var(--soft); border-radius: 999px; padding: 2px 12px; font-size: .92rem; font-weight: 600; }
+  .r-text { white-space: pre-wrap; }
+  .r-photo { width: 100%; max-height: 420px; object-fit: cover; border-radius: 10px; display: block; }
+  .comments { border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 8px; }
+  .comments ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .comment { display: flex; gap: 8px; align-items: flex-start; }
+  .comment > div { min-width: 0; }
+  .c-head b { font-size: .92rem; }
+  .c-form { display: flex; gap: 8px; }
+  .c-form input { flex: 1 1 auto; }
+
+  /* 내 프로필 */
+  .my-shop { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; display: grid; gap: 10px; }
+  .my-shop > header { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; }
+  .my-review { border-top: 1px dashed var(--line); padding-top: 10px; display: grid; gap: 4px; }
+  .my-review .top-line { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .my-photo { width: 120px; border-radius: 8px; display: block; }
+
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 32px); background: #2b2118; color: #fff; padding: 10px 16px; border-radius: 12px; font-weight: 600; z-index: 10; }
+  #toast[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#/">🍜 동네 맛집 평점판</a>
+    <!-- 로그인은 나중에 이 자리에 붙인다. 지금은 아무 기능이 없다. -->
+    <div id="login-slot" class="login-slot">로그인 자리</div>
+    <nav class="nav" aria-label="메뉴">
+      <a href="#/" data-nav="home">맛집</a>
+      <a href="#/write" data-nav="write">리뷰 쓰기</a>
+      <a href="#/me" data-nav="me">내 프로필</a>
+    </nav>
+  </div>
+</header>
+<main id="view"></main>
+<footer>남긴 리뷰는 지금은 이 기기의 브라우저에만 저장돼요. 전화번호나 주소 같은 개인 정보는 적지 마세요.</footer>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="store.js"></script>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const view = $("#view");
+
+const EMOJIS = ["🐶", "🐱", "🐰", "🐻", "🦊", "🐼", "🐯", "🐸", "🐧", "🦁", "🐹", "🐨"];
+const COLORS = ["#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#ffc6ff"];
+const COLOR_NAMES = ["살구색", "연노랑", "연두", "하늘", "파랑", "분홍"];
+const STAR_WORDS = ["", "별로예요", "그저 그래요", "괜찮아요", "맛있어요", "최고예요"];
+
+// 화면이 기억하는 것 (저장은 안 함)
+const ui = { q: "", min: 0, sort: "avg" };
+let wdraft = { stars: 0, photo: null, busy: false };
+let pdraft = { emoji: EMOJIS[0], color: COLORS[0] };
+
+// ── 작은 도우미 ──
+function fmtDate(ts) { const d = new Date(ts); return isNaN(d) ? "" : `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`; }
+function stars(v) {
+  return `<span class="stars" role="img" aria-label="별 5개 중 ${v.toFixed(1)}개" style="--p:${(v / 5) * 100}%">★★★★★</span>`;
+}
+function avatar(a, size = "") {
+  return `<span class="av ${size}" style="background:${esc(a.color)}" aria-hidden="true">${esc(a.emoji)}</span>`;
+}
+let toastTimer = 0;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
+}
+
+// 리뷰들을 가게별로 묶고 평균 · 별점 분포 · 인기 메뉴를 셈한다
+function groupShops() {
+  const map = new Map();
+  for (const r of Store.getReviews()) {           // 새 리뷰가 앞, 그래서 마지막에 본 이름이 가장 처음 적은 이름
+    const key = Store.shopKey(r.shop);
+    let s = map.get(key);
+    if (!s) { s = { key, name: r.shop, reviews: [], sum: 0, dist: [0, 0, 0, 0, 0], menus: new Map() }; map.set(key, s); }
+    s.name = r.shop; s.reviews.push(r); s.sum += r.stars; s.dist[r.stars - 1]++;
+    const mk = r.menu.trim().replace(/\s+/g, " ").toLowerCase();
+    const m = s.menus.get(mk) || { name: r.menu, count: 0, sum: 0 };
+    m.name = r.menu; m.count++; m.sum += r.stars; s.menus.set(mk, m);
+  }
+  for (const s of map.values()) {
+    s.count = s.reviews.length; s.avg = s.sum / s.count; s.last = Math.max(...s.reviews.map((r) => r.createdAt));
+    s.photo = (s.reviews.find((r) => r.photo) || {}).photo || null;
+    s.popular = [...s.menus.values()].sort((a, b) => b.count - a.count || b.sum / b.count - a.sum / a.count);
+  }
+  return [...map.values()];
+}
+
+// ── 길 찾기 (주소의 # 뒤를 보고 화면을 고른다) ──
+function route(keepScroll = false) {
+  const h = location.hash.replace(/^#/, "") || "/";
+  const [path, qs = ""] = h.split("?");
+  const parts = path.split("/").filter(Boolean);
+  const dec = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+  let nav = "home";
+  if (parts[0] === "shop" && parts[1]) viewShop(dec(parts[1]));
+  else if (parts[0] === "write") { nav = "write"; viewWrite(new URLSearchParams(qs).get("shop") || ""); }
+  else if (parts[0] === "me") { nav = "me"; viewMe(); }
+  else viewHome();
+  $$(".nav a").forEach((a) => (a.dataset.nav === nav ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  document.title = "동네 맛집 평점판";
+  if (!keepScroll) window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", () => route());
+// 다른 탭에서 바뀌면 목록 화면은 새로 그린다 (글 쓰는 중인 화면은 건드리지 않음)
+window.addEventListener("storage", () => {
+  Store.reload();
+  if ($("#shop-list") || $("#shop-detail")) route(true);
+});
+
+// ── 1. 맛집 목록: 검색 · 별점 거르기 · 순서 ──
+function viewHome() {
+  const n = groupShops().length, m = Store.getReviews().length;
+  view.innerHTML = `
+    <section class="intro">
+      <h1>우리 동네 맛집 평점판</h1>
+      <p class="sub">${m ? `가게 ${n}곳 · 리뷰 ${m}개` : "가게마다 별점과 한 줄 평을 남겨 보세요."}</p>
+    </section>
+    ${m ? `
+    <div class="row panel">
+      <label class="field grow"><span>가게나 메뉴 찾기</span><input id="q" type="search" placeholder="가게 이름이나 메뉴" value="${esc(ui.q)}"></label>
+      <label class="field"><span>평균 별점</span>
+        <select id="min">${[[0, "전체"], [4, "4점 이상"], [3, "3점 이상"], [2, "2점 이상"]].map(([v, t]) => `<option value="${v}"${ui.min === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label class="field"><span>순서</span>
+        <select id="sort">${[["avg", "평균 높은 순"], ["new", "최신순"], ["count", "리뷰 많은 순"]].map(([v, t]) => `<option value="${v}"${ui.sort === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+      <a class="btn primary" href="#/write">리뷰 쓰기</a>
+    </div>
+    <p class="sub" id="found" aria-live="polite"></p>
+    <div id="shop-list" class="grid"></div>` : `
+    <div class="panel empty" id="empty-all">
+      <p>아직 리뷰가 없어요. 첫 리뷰를 남겨 보세요!</p>
+      <a class="btn primary" href="#/write">리뷰 쓰기</a>
+    </div>`}`;
+  if (m) paintShops();
+}
+function paintShops() {
+  const q = ui.q.trim().toLowerCase();
+  let list = groupShops().filter((s) => s.avg >= ui.min - 1e-9 &&
+    (!q || s.name.toLowerCase().includes(q) || [...s.menus.values()].some((x) => x.name.toLowerCase().includes(q))));
+  const by = {
+    avg: (a, b) => b.avg - a.avg || b.count - a.count || b.last - a.last,        // 같으면 리뷰가 더 많은 가게가 먼저
+    new: (a, b) => b.last - a.last,
+    count: (a, b) => b.count - a.count || b.avg - a.avg,
+  }[ui.sort];
+  list.sort(by);
+  $("#found").textContent = list.length ? `${list.length}곳을 보여 줘요` : "";
+  $("#shop-list").innerHTML = list.length ? list.map((s) => `
+    <a class="shop-card" href="#/shop/${encodeURIComponent(s.key)}">
+      <div class="thumb">${s.photo ? `<img src="${s.photo}" alt="" loading="lazy">` : "🍽️"}</div>
+      <div class="card-body">
+        <h2 class="shop-name">${esc(s.name)}</h2>
+        <p class="rating">${stars(s.avg)} <b class="avg-num">${s.avg.toFixed(1)}</b> <span class="count">리뷰 ${s.count}개</span></p>
+        <p class="menus">많이 시킨 메뉴: ${esc(s.popular[0].name)}</p>
+        ${s.reviews[0].text ? `<p class="snippet">“${esc(s.reviews[0].text)}”</p>` : ""}
+      </div>
+    </a>`).join("") : `<div class="panel empty" id="no-match" style="grid-column:1/-1"><p>맞는 가게가 없어요. 찾는 말이나 별점을 바꿔 보세요.</p></div>`;
+}
+
+// ── 가게 자세히: 평균 · 별점 분포 · 인기 메뉴 · 리뷰와 댓글 ──
+function reviewHTML(r) {
+  const comments = r.comments.map((c) => `
+    <li class="comment">${avatar(c.author, "sm")}
+      <div><p class="c-head"><b>${esc(c.author.name)}</b> <time>${fmtDate(c.createdAt)}</time></p><p class="c-text">${esc(c.text)}</p></div></li>`).join("");
+  const form = Store.getProfile()
+    ? `<form class="c-form" data-review="${esc(r.id)}" novalidate>
+         <input name="text" maxlength="200" placeholder="댓글을 남겨 보세요" aria-label="댓글">
+         <button class="btn small" type="submit">달기</button></form>`
+    : `<p class="hint"><a href="#/me">내 프로필</a>을 만들면 댓글을 달 수 있어요.</p>`;
+  return `
+    <article class="review" data-id="${esc(r.id)}">
+      <header class="r-head">${avatar(r.author)}
+        <div class="r-who"><b class="r-name">${esc(r.author.name)}</b><time>${fmtDate(r.createdAt)}</time></div>
+        <div class="r-stars">${stars(r.stars)}</div></header>
+      <p><span class="chip r-menu">🍴 ${esc(r.menu)}</span></p>
+      ${r.text ? `<p class="r-text">${esc(r.text)}</p>` : ""}
+      ${r.photo ? `<img class="r-photo" src="${r.photo}" alt="${esc(r.shop)} ${esc(r.menu)} 사진" loading="lazy">` : ""}
+      <section class="comments" aria-label="댓글">
+        <h3 class="c-count">댓글 ${r.comments.length}개</h3>
+        ${comments ? `<ul>${comments}</ul>` : ""}${form}
+      </section>
+    </article>`;
+}
+function viewShop(key) {
+  const s = groupShops().find((x) => x.key === key);
+  if (!s) {
+    view.innerHTML = `<a class="back" href="#/">← 맛집 목록</a><div class="panel empty"><p>그 가게를 찾지 못했어요.</p><a class="btn primary" href="#/">맛집 목록으로</a></div>`;
+    return;
+  }
+  const max = Math.max(...s.dist, 1);
+  view.innerHTML = `
+    <div id="shop-detail">
+    <a class="back" href="#/">← 맛집 목록</a>
+    <section class="panel shop-head">
+      <h1 class="shop-name">${esc(s.name)}</h1>
+      <div class="avg-big">${stars(s.avg)}<b class="avg-num">${s.avg.toFixed(1)}</b><span class="count">리뷰 ${s.count}개</span></div>
+      <div class="sum-grid">
+        <div><h3>별점 분포</h3>
+          ${[5, 4, 3, 2, 1].map((n) => `<div class="dist-row" data-star="${n}"><span>${n}점</span><div class="bar"><span style="width:${(s.dist[n - 1] / max) * 100}%"></span></div><span class="num">${s.dist[n - 1]}</span></div>`).join("")}
+        </div>
+        <div><h3>많이 시킨 메뉴</h3>
+          <ul class="pop">${s.popular.slice(0, 5).map((m) => `<li><b>${esc(m.name)}</b><span class="count">${m.count}번 · 평균 ${(m.sum / m.count).toFixed(1)}점</span></li>`).join("")}</ul>
+        </div>
+      </div>
+    </section>
+    <div class="list-title"><h2>리뷰 ${s.count}개</h2>
+      <a class="btn primary" href="#/write?shop=${encodeURIComponent(s.name)}">이 가게에 리뷰 쓰기</a></div>
+    ${s.reviews.slice().sort((a, b) => b.createdAt - a.createdAt).map(reviewHTML).join("")}
+    </div>`;
+}
+
+// ── 2. 리뷰 쓰기: 가게 · 메뉴 · 별점 · 글 · 사진 ──
+function viewWrite(shopName) {
+  wdraft = { stars: 0, photo: null, busy: false };
+  if (!Store.getProfile()) {
+    view.innerHTML = `<h1>리뷰 쓰기</h1><div class="panel empty" id="need-profile">
+      <p>리뷰에는 작성자 이름과 프로필 그림이 같이 남아요.<br>먼저 내 프로필을 만들어 주세요.</p>
+      <a class="btn primary" href="#/me">내 프로필 만들기</a></div>`;
+    return;
+  }
+  const me = Store.getProfile();
+  const names = groupShops().map((s) => s.name);
+  view.innerHTML = `
+    <h1>리뷰 쓰기</h1>
+    <form id="write-form" class="panel form" novalidate>
+      <div class="preview">${avatar(me)}<p>작성자: <b>${esc(me.name)}</b></p></div>
+      <label class="field"><span>가게</span><input name="shop" maxlength="30" list="shop-names" autocomplete="off" placeholder="예: 행복 분식" value="${esc(shopName)}"></label>
+      <datalist id="shop-names">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+      <label class="field"><span>시킨 메뉴</span><input name="menu" maxlength="30" autocomplete="off" placeholder="예: 떡볶이"></label>
+      <fieldset><legend>별점</legend>
+        <div class="star-pick" role="radiogroup" aria-label="별점">
+          ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="star-btn" role="radio" aria-checked="false" aria-label="${n}점" data-v="${n}">★</button>`).join("")}
+          <span class="star-word" id="star-word"></span>
+        </div></fieldset>
+      <label class="field"><span>리뷰 (한 줄 평도 좋아요)</span><textarea name="text" maxlength="500" placeholder="어떤 점이 좋았나요?"></textarea></label>
+      <div class="field"><span>사진 (없어도 돼요)</span>
+        <input id="photo" type="file" accept="image/*">
+        <div id="photo-box"></div></div>
+      <p class="msg" id="form-msg" role="alert"></p>
+      <div><button class="btn primary" type="submit" id="send">리뷰 남기기</button></div>
+    </form>`;
+}
+function paintStars() {
+  $$(".star-btn").forEach((b) => {
+    const on = +b.dataset.v <= wdraft.stars;
+    b.classList.toggle("on", on); b.setAttribute("aria-checked", String(+b.dataset.v === wdraft.stars));
+  });
+  const w = $("#star-word"); if (w) w.textContent = wdraft.stars ? `${wdraft.stars}점 · ${STAR_WORDS[wdraft.stars]}` : "";
+}
+function paintPhoto() {
+  const box = $("#photo-box"); if (!box) return;
+  box.innerHTML = wdraft.photo
+    ? `<img id="photo-preview" src="${wdraft.photo}" alt="고른 사진" style="max-width:240px;border-radius:10px;display:block;margin:6px 0"><button type="button" class="btn small photo-clear">사진 빼기</button>`
+    : "";
+}
+// 사진은 저장 공간이 작아서 긴 쪽 800px 이하로 줄여 JPEG 로 저장한다
+async function shrink(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 800 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(bmp.width * scale)); c.height = Math.max(1, Math.round(bmp.height * scale));
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.7);
+}
+
+// ── 3. 내 프로필 + 내가 남긴 리뷰 ──
+function viewMe() {
+  const me = Store.getProfile();
+  pdraft = me ? { emoji: me.emoji, color: me.color } : { emoji: EMOJIS[0], color: COLORS[0] };
+  let mine = "";
+  if (me) {
+    const groups = new Map();
+    for (const r of Store.getReviews()) if (r.author.id === me.id) {
+      const k = Store.shopKey(r.shop);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    const shops = new Map(groupShops().map((s) => [s.key, s]));
+    const nComments = Store.getReviews().reduce((n, r) => n + r.comments.filter((c) => c.author.id === me.id).length, 0);
+    const nReviews = [...groups.values()].reduce((n, l) => n + l.length, 0);
+    mine = `
+      <div class="list-title"><h2>내가 남긴 리뷰</h2><span class="sub" id="my-summary">가게 ${groups.size}곳 · 리뷰 ${nReviews}개 · 댓글 ${nComments}개</span></div>
+      ${groups.size ? [...groups].map(([k, list]) => { const s = shops.get(k); return `
+        <section class="my-shop" data-shop="${esc(k)}">
+          <header><h3><a class="my-shop-name" href="#/shop/${encodeURIComponent(k)}">${esc(s.name)}</a></h3>
+            <span class="count">이 가게 평균 ${s.avg.toFixed(1)}점 · 내 리뷰 ${list.length}개</span></header>
+          ${list.map((r) => `
+            <div class="my-review"><div class="top-line">${stars(r.stars)} <span class="chip">🍴 ${esc(r.menu)}</span> <time>${fmtDate(r.createdAt)}</time></div>
+              ${r.text ? `<p class="r-text">${esc(r.text)}</p>` : ""}
+              ${r.photo ? `<img class="my-photo" src="${r.photo}" alt="내가 올린 사진" loading="lazy">` : ""}
+              ${r.comments.length ? `<p class="count">댓글 ${r.comments.length}개</p>` : ""}</div>`).join("")}
+        </section>`; }).join("")
+      : `<div class="panel empty" id="no-mine"><p>아직 남긴 리뷰가 없어요.</p><a class="btn primary" href="#/write">첫 리뷰 쓰기</a></div>`}`;
+  }
+  view.innerHTML = `
+    <h1>내 프로필</h1>
+    <form id="profile-form" class="panel form" novalidate>
+      <div class="preview" id="p-preview"></div>
+      <label class="field"><span>이름 (별명)</span><input name="name" maxlength="12" autocomplete="off" placeholder="실명 말고 별명을 써 주세요" value="${me ? esc(me.name) : ""}"></label>
+      <fieldset><legend>프로필 그림</legend>
+        <div class="pick" id="emoji-pick">${EMOJIS.map((e) => `<button type="button" class="emoji-btn" data-emoji="${e}" aria-label="그림 ${e}">${e}</button>`).join("")}</div></fieldset>
+      <fieldset><legend>바탕색</legend>
+        <div class="pick colors" id="color-pick">${COLORS.map((c, i) => `<button type="button" class="color-btn" data-color="${c}" aria-label="${COLOR_NAMES[i]}" style="background:${c}"></button>`).join("")}</div></fieldset>
+      <p class="msg" id="form-msg" role="alert"></p>
+      <div><button class="btn primary" type="submit">${me ? "프로필 고치기" : "프로필 만들기"}</button></div>
+    </form>
+    ${mine}`;
+  paintProfile();
+}
+function paintProfile() {
+  const name = ($("#profile-form [name=name]") || {}).value || "";
+  $("#p-preview").innerHTML = `${avatar({ emoji: pdraft.emoji, color: pdraft.color }, "lg")}<p><b>${esc(name.trim() || "이름을 적어 주세요")}</b></p>`;
+  $$(".emoji-btn").forEach((b) => b.classList.toggle("on", b.dataset.emoji === pdraft.emoji));
+  $$(".color-btn").forEach((b) => b.classList.toggle("on", b.dataset.color === pdraft.color));
+}
+
+// ── 눌렀을 때 · 쓸 때 · 보낼 때 ──
+view.addEventListener("click", (e) => {
+  const star = e.target.closest(".star-btn");
+  if (star) { wdraft.stars = +star.dataset.v; paintStars(); return; }
+  const em = e.target.closest(".emoji-btn");
+  if (em) { pdraft.emoji = em.dataset.emoji; paintProfile(); return; }
+  const co = e.target.closest(".color-btn");
+  if (co) { pdraft.color = co.dataset.color; paintProfile(); return; }
+  if (e.target.closest(".photo-clear")) { wdraft.photo = null; $("#photo").value = ""; paintPhoto(); }
+});
+view.addEventListener("input", (e) => {
+  if (e.target.id === "q") { ui.q = e.target.value; paintShops(); }
+  else if (e.target.closest("#profile-form") && e.target.name === "name") paintProfile();
+});
+view.addEventListener("change", async (e) => {
+  if (e.target.id === "min") { ui.min = +e.target.value; paintShops(); }
+  else if (e.target.id === "sort") { ui.sort = e.target.value; paintShops(); }
+  else if (e.target.id === "photo") {
+    const file = e.target.files[0];
+    $("#form-msg").textContent = "";
+    if (!file) { wdraft.photo = null; paintPhoto(); return; }
+    wdraft.busy = true;
+    try { wdraft.photo = await shrink(file); }
+    catch (err) { wdraft.photo = null; e.target.value = ""; $("#form-msg").textContent = "이 사진은 열 수 없어요. 다른 사진을 골라 주세요."; }
+    wdraft.busy = false; paintPhoto();
+  }
+});
+view.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.id === "write-form") sendReview(f);
+  else if (f.id === "profile-form") sendProfile(f);
+  else if (f.classList.contains("c-form")) sendComment(f);
+});
+function sendReview(f) {
+  const msg = $("#form-msg"), v = (n) => f.elements[n].value.trim().replace(/[ \t]+/g, " ");
+  const shop = v("shop"), menu = v("menu"), text = f.elements.text.value.trim();
+  const problem = !shop ? "가게 이름을 적어 주세요." : !menu ? "시킨 메뉴를 적어 주세요." : !wdraft.stars ? "별점을 눌러 주세요."
+    : !text ? "리뷰를 한 줄이라도 적어 주세요." : wdraft.busy ? "사진을 줄이는 중이에요. 잠깐만 기다려 주세요." : "";
+  if (problem) { msg.textContent = problem; return; }
+  const res = Store.addReview({ shop, menu, stars: wdraft.stars, text, photo: wdraft.photo });
+  if (!res.ok) { msg.textContent = res.message; toast(res.message); return; }
+  location.hash = "#/shop/" + encodeURIComponent(Store.shopKey(shop));
+  toast("리뷰를 남겼어요.");
+}
+function sendProfile(f) {
+  const name = f.elements.name.value.trim().replace(/\s+/g, " ");
+  if (!name) { $("#form-msg").textContent = "이름을 적어 주세요."; return; }
+  const res = Store.saveProfile({ name, emoji: pdraft.emoji, color: pdraft.color });
+  if (!res.ok) { $("#form-msg").textContent = res.message; toast(res.message); return; }
+  toast("프로필을 저장했어요.");
+  route(true);
+}
+function sendComment(f) {
+  const text = f.elements.text.value.trim();
+  if (!text) { f.elements.text.focus(); return; }
+  const id = f.dataset.review, y = window.scrollY;
+  const res = Store.addComment(id, text);
+  if (!res.ok) { toast(res.message); return; }
+  route(true); window.scrollTo(0, y);
+  const next = $(`.c-form[data-review="${CSS.escape(id)}"] input`); if (next) next.focus({ preventScroll: true });
+}
+
+route();
+</script>
+</body>
+</html>
