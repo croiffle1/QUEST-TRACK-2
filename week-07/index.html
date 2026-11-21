@@ -22,6 +22,8 @@
   .top-in { max-width: 960px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
   .brand { font-weight: 800; font-size: 1.15rem; text-decoration: none; margin-right: auto; }
   .login-slot { order: 1; border: 2px dashed var(--line); border-radius: 999px; padding: 4px 14px; color: var(--muted); font-size: .9rem; white-space: nowrap; }
+  .login-slot.on { border-style: solid; padding: 0; border-color: transparent; }
+  .login-slot .btn { min-height: 40px; padding: 4px 16px; }
   .nav { order: 2; width: 100%; display: flex; gap: 6px; }
   .nav a { flex: 1 1 0; text-align: center; padding: 8px 6px; border-radius: 10px; text-decoration: none; font-weight: 600; background: var(--soft); }
   .nav a[aria-current="page"] { background: var(--brand); color: var(--brand-ink); }
@@ -133,7 +135,7 @@
 <header class="top">
   <div class="top-in">
     <a class="brand" href="#/">🍜 동네 맛집 평점판</a>
-    <!-- 로그인은 나중에 이 자리에 붙인다. 지금은 아무 기능이 없다. -->
+    <!-- 로그인은 나중에 이 자리에 붙인다. 로그인한 상태에서는 이 자리가 [로그아웃] 단추로 바뀐다. (로그인은 아직 없음) -->
     <div id="login-slot" class="login-slot">로그인 자리</div>
     <nav class="nav" aria-label="메뉴">
       <a href="#/" data-nav="home">맛집</a>
@@ -198,8 +200,22 @@ function groupShops() {
   return [...map.values()];
 }
 
+// ── 위쪽 로그인 자리: 로그인한 상태면 [로그아웃] 단추, 아니면 "로그인 자리" 글자만 ──
+function paintLoginSlot() {
+  const slot = $("#login-slot"), on = !!Store.getSession();
+  slot.classList.toggle("on", on);
+  slot.innerHTML = on ? `<button type="button" class="btn" id="logout-btn">로그아웃</button>` : "로그인 자리";
+}
+$("#login-slot").addEventListener("click", (e) => {
+  if (!e.target.closest("#logout-btn")) return;
+  const res = Store.logout();
+  if (!res.ok) { toast(res.message); return; }
+  paintLoginSlot(); toast("로그아웃했어요.");
+});
+
 // ── 길 찾기 (주소의 # 뒤를 보고 화면을 고른다) ──
 function route(keepScroll = false) {
+  paintLoginSlot();
   const h = location.hash.replace(/^#/, "") || "/";
   const [path, qs = ""] = h.split("?");
   const parts = path.split("/").filter(Boolean);
@@ -216,7 +232,7 @@ function route(keepScroll = false) {
 window.addEventListener("hashchange", () => route());
 // 다른 탭에서 바뀌면 목록 화면은 새로 그린다 (글 쓰는 중인 화면은 건드리지 않음)
 window.addEventListener("storage", () => {
-  Store.reload();
+  Store.reload(); paintLoginSlot();
   if ($("#shop-list") || $("#shop-detail")) route(true);
 });
 

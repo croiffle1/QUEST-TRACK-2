@@ -12,6 +12,7 @@
 
 const Store = (() => {
   const KEY = "pt-matjip-v1";
+  const SESSION_KEY = "pt-matjip-session";   // 로그인한 상태 (로그인은 아직 없어서 지금은 아무도 이 칸을 채우지 않는다)
 
   const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
   const num = (v) => (Number.isFinite(v) ? v : 0);
@@ -75,6 +76,19 @@ const Store = (() => {
     shopKey: (name) => String(name).trim().replace(/\s+/g, " ").toLowerCase(),
 
     reload() { data = read(); },
+
+    // 로그인한 상태인지. 로그인을 붙일 때 이 두 함수(getSession · logout)와 login 을 이 파일 안에서 이어 준다.
+    getSession() {
+      try {
+        const s = JSON.parse(localStorage.getItem(SESSION_KEY));
+        return s && typeof s === "object" ? s : null;
+      } catch (e) { return null; }
+    },
+    // 로그아웃: 로그인한 상태만 지운다. 남긴 리뷰 · 프로필은 그대로 둔다.
+    logout() {
+      try { localStorage.removeItem(SESSION_KEY); return { ok: true }; }
+      catch (e) { return { ok: false, message: "로그아웃하지 못했어요. 다시 눌러 주세요." }; }
+    },
     getProfile: () => data.profile,
     getReviews: () => data.reviews,
 

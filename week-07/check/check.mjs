@@ -13,6 +13,7 @@
 //  6. 목록: 평균 · 리뷰 개수, 검색(가게 · 메뉴), 별점 거르기, 순서 3가지
 //  7. 가게 자세히: 별점 분포, 많이 시킨 메뉴
 //  8. 내 프로필: 어떤 가게에 어떤 리뷰를 남겼는지, 이름을 고치면 옛 리뷰 이름도 바뀌는지
+//  8-1. 로그인한 상태면 "로그인 자리"가 [로그아웃] 단추로 바뀌고, 누르면 원래 자리로 돌아오는지 (로그인 자체는 아직 없음)
 //  9. 저장: 다시 열어도 남는지, 저장 공간이 가득 차면 까닭을 알려 주고 되돌리는지, 저장 코드가 store.js 한곳에만 있는지
 // 10. 이상한 글(HTML 태그)이 그대로 글자로 보이는지
 // 11. 폰 · 태블릿 · 컴퓨터 화면 폭(320~1920)에서 잘리거나 옆으로 밀리지 않는지
@@ -390,6 +391,31 @@ try {
   await go("#/me");
   check((await text("#my-summary")).includes("댓글 1개"), "내가 단 댓글 수도 요약에 보임: " + (await text("#my-summary")), "댓글 요약: " + (await text("#my-summary")));
 
+  // 8-1. 로그아웃 단추
+  console.log("[로그아웃 단추 (로그인한 상태일 때)]");
+  const SESSION = "pt-matjip-session";
+  await openApp({ seed: seedData(photoUrl) });
+  check(await js(`document.getElementById("login-slot").innerText.trim() === "로그인 자리" && !document.getElementById("logout-btn")`),
+    "로그인한 상태가 아니면 \"로그인 자리\" 글자만 보이고 로그아웃 단추는 없음", "로그인 안 했는데 로그아웃 단추가 보임");
+  await js(`localStorage.setItem(${JSON.stringify(SESSION)}, JSON.stringify({ at: 1 }))`);
+  await openApp({ keep: true });
+  const lo = await js(`(() => { const s = document.getElementById("login-slot"), b = document.getElementById("logout-btn"); const r = b?.getBoundingClientRect();
+    return { btn: b?.innerText.trim(), tag: b?.tagName, text: s.innerText.trim(), top: r?.top, h: r?.height, slotTop: s.getBoundingClientRect().top }; })()`);
+  check(lo.btn === "로그아웃" && lo.tag === "BUTTON" && lo.text === "로그아웃" && lo.h >= 40 && lo.top < 120,
+    "로그인한 상태면 \"로그인 자리\" 대신 위쪽에 [로그아웃] 단추가 보임", "로그인한 상태의 위쪽: " + JSON.stringify(lo));
+  await shot("8-로그아웃단추");
+  await go("#/me");
+  check(await js(`!!document.getElementById("logout-btn")`), "다른 화면(내 프로필)에서도 [로그아웃] 단추가 그대로 보임", "다른 화면에서 단추가 사라짐");
+  await click("#logout-btn");
+  const after = await js(`({ text: document.getElementById("login-slot").innerText.trim(), btn: !!document.getElementById("logout-btn"),
+    session: localStorage.getItem(${JSON.stringify(SESSION)}), toast: document.getElementById("toast").innerText })`);
+  check(after.text === "로그인 자리" && !after.btn && after.session === null && after.toast.includes("로그아웃했어요"),
+    "[로그아웃]을 누르면 로그인한 상태가 지워지고 \"로그인 자리\"로 돌아옴", "로그아웃 뒤: " + JSON.stringify(after));
+  st = await stored();
+  check(st.profile?.name === "새이름" || st.profile?.name === "맛객", "로그아웃해도 프로필과 남긴 리뷰는 그대로 남음 (리뷰 " + st.reviews.length + "개)", "로그아웃하니 저장 내용이 바뀜");
+  await openApp({ keep: true });
+  check(await js(`!document.getElementById("logout-btn")`), "다시 열어도 로그아웃한 상태가 유지됨", "다시 열면 로그아웃 단추가 또 나옴");
+
   // 10. 이상한 글
   console.log("[이상한 글]");
   const evil = seedData(null);
@@ -434,6 +460,18 @@ try {
         `${name} ${w}×${h} (${label}): 페이지 폭 ${f.scrollW} > 화면 ${f.W}, 넘친 것: ${f.out.join(", ") || "없음"}`);
     }
   }
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await openApp({ seed: long, hash: "#/" });
+  await js(`localStorage.setItem(${JSON.stringify(SESSION)}, JSON.stringify({ at: 1 }))`);
+  await openApp({ keep: true, hash: "#/" });
+  for (const w of [320, 390]) {
+    await send("Emulation.setDeviceMetricsOverride", { width: w, height: 700, deviceScaleFactor: 2, mobile: true });
+    await sleep(100);
+    const fo = await js(FIT); await shot(`11-로그아웃단추-${w}`);
+    const bt = await js(`(() => { const r = document.getElementById("logout-btn").getBoundingClientRect(); return r.right <= innerWidth && r.left >= 0 && r.height > 0; })()`);
+    check(fo.scrollW <= fo.W && fo.out.length === 0 && bt, `폰 ${w} 화면에서도 [로그아웃] 단추가 잘리지 않음`, `폰 ${w} 로그아웃 단추: ${JSON.stringify(fo)} ${bt}`);
+  }
+  await js(`localStorage.removeItem(${JSON.stringify(SESSION)})`);
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await openApp({ seed: long, hash: "#/" });
   const slotPhone = await js(`(() => { const r = document.getElementById("login-slot").getBoundingClientRect(); return r.top < 120 && r.right <= innerWidth && r.height > 0; })()`);
